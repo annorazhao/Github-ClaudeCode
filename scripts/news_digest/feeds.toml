@@ -1,85 +1,683 @@
 # Sources and settings for /news-digest (scripts/news_digest/news_digest.py).
 #
+# The digest is US-focused with the Washington region first: Northern Virginia at state,
+# county, and city or town level, then the District, Maryland, and region-wide bodies
+# (WMATA, MWCOG, MWAA). United States news follows by topic, then a few major world items,
+# then an archive section that walks through the region's transportation history.
+#
 # Each [[feed]] entry has:
-#   name   display name used in the email
-#   url    RSS / Atom URL (a local file path is also accepted, for tests)
-#   topic  transportation | energy | environment | industrial_organization | auto
-#          "auto" means: classify every item by the keyword lists under [topics]
-#          and drop items that match none of them. Use it for general-news feeds.
-#   weight optional ranking multiplier, default 1.0 (0.5 = de-emphasize, 1.5 = boost)
+#   name        display name used in the email footer and, for ordinary feeds, on items
+#   url         RSS / Atom URL (a local file path is also accepted, for tests)
+#     or
+#   google_news a Google News search query; the script builds the RSS URL and appends the
+#               recency operator in [settings].google_news_recency. Items carry the real
+#               outlet as their source. This is how large outlets without public feeds
+#               (Reuters, AP, Bloomberg, Politico Pro, local TV) and small local papers
+#               get in without maintaining dozens of feed URLs.
+#   topic       transportation | energy | environment | industrial_organization | auto
+#               "auto" classifies each item by the [topics] keywords and drops non-matches.
+#   region      us (default) | dc (a Washington-region local source) | world
+#   subregion   for region = "dc": nova | dc | maryland | regional, used when no place
+#               keyword resolves on an item (default: [settings].default_local_region)
+#   weight      ranking multiplier, default 1.0 (0.5 = de-emphasize, 1.5 = boost)
 #
 # Feeds are fetched independently; one dead feed never fails the run. The email footer
 # lists feeds that returned nothing, and `news_digest.py check-feeds` prints a full
 # health report. Prune or replace entries that stay dead.
 
 [settings]
-lookback_hours = 26            # window for "the past day" (26 gives slack for late feeds)
-max_items_per_topic = 8        # items shown per section in the email
-max_candidates_per_topic = 30  # items offered to the summarizer per section
-timezone = "America/New_York"  # used for dates in the email and --only-at-hour
-require_date = true            # skip entries with no publication date (avoids daily repeats)
+lookback_hours = 26               # window for "the past day" (26 gives slack for late feeds)
+max_candidates_per_section = 25   # items offered to the summarizer per section
+timezone = "America/New_York"     # used for dates in the email and --only-at-hour
+require_date = true               # skip entries with no publication date (avoids daily repeats)
+default_local_region = "regional" # where an item from a local feed goes when no place resolves
+google_news_recency = "when:2d"   # appended to every google_news query
+# Words that mark a story as being about traffic or transport even when the topic keywords
+# below do not fire (local feeds carry crime and politics too; this keeps only the road,
+# rail, transit, and street stories).
+traffic_keywords = [
+  "traffic", "crash", "collision", "lane closure", "lane closures", "lanes closed", "road closure",
+  "road closures", "closure", "detour", "congestion", "commute", "commuters", "commuting", "rush hour",
+  "toll", "tolls", "tolling", "HOV", "express lanes", "HOT lanes", "speed camera", "speed cameras",
+  "red-light camera", "automated enforcement", "Vision Zero", "pedestrian", "pedestrians", "cyclist",
+  "cyclists", "bike lane", "bike lanes", "bus lane", "bus lanes", "transit", "Metro", "Metrorail",
+  "Metrobus", "bus", "buses", "rail", "parking", "road work", "roadwork", "bridge", "interchange",
+  "widening", "intersection", "roundabout", "sidewalk", "sidewalks", "trail", "ridership", "fare",
+  "fares", "bike", "scooter", "scooters", "Capital Bikeshare", "highway", "interstate", "parkway",
+  "gas tax", "vehicle miles", "truck", "trucks", "freight", "airport", "flights", "Amtrak", "VRE",
+  "MARC", "streetcar", "light rail", "BRT", "bus rapid transit", "guardrail", "pavement", "potholes",
+  "speed limit", "speeding", "traffic deaths", "traffic fatalities", "road safety", "transportation",
+]
 
 # ---------------------------------------------------------------------------
-# Topics. Order here is the order of sections in the email.
-# Keywords are matched case-insensitively on whole words/phrases in title + summary.
+# Topics. Order here is the order of the United States sections in the email.
+# Keywords are matched case-insensitively on whole words/phrases in title + summary; short
+# all-caps entries (EV, DOT, COP, FTC) match case-sensitively.
 # ---------------------------------------------------------------------------
 
 [topics.transportation]
 label = "Transportation"
 keywords = [
-  "transportation", "transport", "transit", "highway", "freight", "rail", "railroad",
-  "railway", "trucking", "trucks", "airline", "airlines", "aviation", "airport", "port",
-  "ports", "shipping", "maritime", "autonomous vehicle", "self-driving", "robotaxi",
-  "electric vehicle", "electric vehicles", "EV", "EVs", "congestion pricing", "toll",
-  "infrastructure", "FAA", "DOT", "NHTSA", "FHWA", "Amtrak", "bus", "buses", "ride-hail",
-  "ridehailing", "Uber", "Lyft", "Waymo", "traffic", "logistics", "supply chain",
-  "fuel economy", "CAFE standards", "automaker", "automakers", "vehicle", "vehicles",
-  "commute", "bike lane", "high-speed rail", "Boeing", "Airbus", "tariffs on cars",
+  "transportation", "transport", "transit", "highway", "highways", "freight", "rail", "railroad",
+  "railway", "trucking", "trucks", "airline", "airlines", "aviation", "airport", "airports", "port",
+  "ports", "shipping", "maritime", "autonomous vehicle", "autonomous vehicles", "self-driving",
+  "robotaxi", "electric vehicle", "electric vehicles", "EV", "EVs", "congestion pricing", "toll",
+  "tolls", "infrastructure", "FAA", "DOT", "NHTSA", "FHWA", "FTA", "Amtrak", "bus", "buses",
+  "ride-hail", "ridehailing", "Uber", "Lyft", "Waymo", "traffic", "logistics", "supply chain",
+  "fuel economy", "CAFE standards", "automaker", "automakers", "vehicle", "vehicles", "commute",
+  "bike lane", "high-speed rail", "Boeing", "Airbus", "tariffs on cars", "Vision Zero",
+  "speed cameras", "transit agency", "bridge", "interstate", "pedestrian", "road safety",
 ]
 
 [topics.energy]
 label = "Energy"
 keywords = [
-  "energy", "electricity", "power grid", "grid", "utility", "utilities", "natural gas",
-  "LNG", "oil", "crude", "OPEC", "gasoline", "diesel", "refinery", "pipeline", "solar",
-  "wind", "offshore wind", "nuclear", "reactor", "battery", "batteries", "storage",
-  "hydrogen", "coal", "renewable", "renewables", "FERC", "EIA", "PJM", "ERCOT", "ISO",
-  "capacity market", "transmission", "interconnection", "data center", "data centers",
-  "electricity prices", "power prices", "rate case", "net metering", "IRA tax credit",
-  "clean energy", "fossil fuel", "fracking", "shale", "Exxon", "Chevron", "Shell",
+  "energy", "electricity", "power grid", "grid", "utility", "utilities", "natural gas", "LNG",
+  "oil", "crude", "OPEC", "gasoline", "diesel", "refinery", "pipeline", "solar", "wind",
+  "offshore wind", "nuclear", "reactor", "battery", "batteries", "storage", "hydrogen", "coal",
+  "renewable", "renewables", "FERC", "EIA", "PJM", "ERCOT", "capacity market", "transmission",
+  "interconnection", "data center", "data centers", "electricity prices", "power prices",
+  "rate case", "net metering", "clean energy", "fossil fuel", "fracking", "shale", "Exxon",
+  "Chevron", "Shell", "Dominion", "Dominion Energy", "Pepco", "BGE", "SCC", "public service commission",
 ]
 
 [topics.environment]
 label = "Environment"
 keywords = [
-  "environment", "environmental", "climate", "emissions", "carbon", "CO2", "methane",
-  "greenhouse", "pollution", "air quality", "water quality", "PFAS", "EPA", "Clean Air Act",
-  "Clean Water Act", "NEPA", "endangered species", "wildfire", "wildfires", "drought",
-  "flood", "flooding", "hurricane", "heat wave", "sea level", "conservation", "biodiversity",
-  "deforestation", "recycling", "plastic", "toxic", "superfund", "carbon tax", "cap-and-trade",
-  "carbon market", "carbon capture", "net zero", "Paris Agreement", "COP", "IPCC",
-  "climate policy", "environmental justice", "resilience", "adaptation",
+  "environment", "environmental", "climate", "emissions", "carbon", "CO2", "methane", "greenhouse",
+  "pollution", "air quality", "water quality", "PFAS", "EPA", "Clean Air Act", "Clean Water Act",
+  "NEPA", "endangered species", "wildfire", "wildfires", "drought", "flood", "flooding", "hurricane",
+  "heat wave", "sea level", "conservation", "biodiversity", "deforestation", "recycling", "plastic",
+  "toxic", "superfund", "carbon tax", "cap-and-trade", "carbon market", "carbon capture", "net zero",
+  "Paris Agreement", "COP", "IPCC", "climate policy", "environmental justice", "resilience",
+  "adaptation", "Chesapeake Bay", "stormwater", "RGGI",
 ]
 
 [topics.industrial_organization]
-label = "Industrial Organization & Antitrust"
+label = "Industrial Organization and Antitrust"
 keywords = [
-  "antitrust", "anti-trust", "merger", "mergers", "acquisition", "acquires", "acquire",
-  "takeover", "buyout", "monopoly", "monopolization", "monopsony", "FTC", "Federal Trade Commission",
-  "DOJ", "Justice Department", "competition", "competition policy", "market power",
-  "price fixing", "price-fixing", "collusion", "cartel", "bid rigging", "regulation",
-  "regulator", "regulators", "deregulation", "platform", "platforms", "Big Tech", "Amazon",
-  "Google", "Alphabet", "Meta", "Apple", "Microsoft", "Nvidia", "vertical integration",
-  "consolidation", "oligopoly", "market concentration", "concentration", "entry", "exit",
-  "pricing", "algorithmic pricing", "surge pricing", "CMA", "European Commission",
-  "Digital Markets Act", "DMA", "noncompete", "non-compete", "labor market power",
-  "hospital merger", "airline merger", "deal", "divestiture", "consent decree", "Section 2",
-  "Sherman Act", "Clayton Act", "HSR", "Hart-Scott-Rodino", "class action", "price discrimination",
+  "antitrust", "anti-trust", "merger", "mergers", "acquisition", "acquires", "acquire", "takeover",
+  "buyout", "monopoly", "monopolization", "monopsony", "FTC", "Federal Trade Commission", "DOJ",
+  "Justice Department", "competition", "competition policy", "market power", "price fixing",
+  "price-fixing", "collusion", "cartel", "bid rigging", "regulation", "regulator", "regulators",
+  "deregulation", "platform", "platforms", "Big Tech", "Amazon", "Google", "Alphabet", "Meta",
+  "Apple", "Microsoft", "Nvidia", "vertical integration", "consolidation", "oligopoly",
+  "market concentration", "concentration", "entry", "exit", "pricing", "algorithmic pricing",
+  "surge pricing", "CMA", "European Commission", "Digital Markets Act", "DMA", "noncompete",
+  "non-compete", "labor market power", "hospital merger", "airline merger", "deal", "divestiture",
+  "consent decree", "Section 2", "Sherman Act", "Clayton Act", "HSR", "Hart-Scott-Rodino",
+  "class action", "price discrimination",
 ]
 
 # ---------------------------------------------------------------------------
-# Transportation
+# Washington-region place keywords. Order here is the order of the region sections in the
+# email and the tie-break when an item mentions several places (Northern Virginia wins).
+# `exclude` entries subtract from a region's score so that "West Virginia" or
+# "Virginia Beach" stories do not land in the Northern Virginia section.
 # ---------------------------------------------------------------------------
+
+[regions.nova]
+label = "Northern Virginia"
+boost = 1.6
+keywords = [
+  "Northern Virginia", "NoVA", "Fairfax", "Fairfax County", "Arlington", "Arlington County",
+  "Loudoun", "Loudoun County", "Prince William", "Prince William County", "Alexandria",
+  "Falls Church", "Fairfax City", "City of Fairfax", "Manassas", "Manassas Park", "Tysons",
+  "Reston", "Herndon", "Vienna", "McLean", "Springfield", "Leesburg", "Ashburn", "Sterling",
+  "Dulles", "Dulles Toll Road", "Dulles Greenway", "Woodbridge", "Dale City", "Centreville",
+  "Chantilly", "Annandale", "Burke", "Lorton", "Gainesville", "Haymarket", "Dumfries",
+  "Crystal City", "National Landing", "Pentagon City", "Rosslyn", "Ballston", "Columbia Pike",
+  "I-66", "Interstate 66", "I-495", "Capital Beltway", "Beltway", "I-95", "I-395", "Route 28",
+  "Route 7", "Route 1", "Richmond Highway", "Route 50", "Route 123", "Route 29", "Route 236",
+  "Fairfax County Parkway", "Prince William Parkway", "Express Lanes", "HOT lanes", "495 NEXT",
+  "VDOT", "Virginia Department of Transportation", "Commonwealth Transportation Board", "CTB",
+  "NVTA", "Northern Virginia Transportation Authority", "NVTC", "Northern Virginia Transportation Commission",
+  "VRE", "Virginia Railway Express", "Fairfax Connector", "OmniRide", "DASH", "ART bus",
+  "Silver Line", "Orange Line", "Blue Line", "Yellow Line", "Virginia General Assembly",
+  "Virginia Senate", "House of Delegates", "Virginia", "Governor Spanberger", "Spanberger",
+  "Long Bridge", "Transurban", "Smart Scale", "Virginia Passenger Rail Authority", "VPRA",
+]
+exclude = [
+  "West Virginia", "Virginia Beach", "Hampton Roads", "Norfolk", "Roanoke", "Blacksburg",
+  "Charlottesville", "Lynchburg", "Richmond region", "Chesapeake", "Newport News", "Virginia Tech",
+]
+
+[regions.dc]
+label = "District of Columbia"
+boost = 1.3
+keywords = [
+  "D.C.", "DC", "District of Columbia", "Washington, D.C.", "Washington, DC", "DDOT",
+  "District Department of Transportation", "D.C. Council", "DC Council", "Mayor Bowser", "Bowser",
+  "Circulator", "Capital Bikeshare", "Anacostia", "Georgetown", "Navy Yard", "K Street",
+  "Connecticut Avenue", "Pennsylvania Avenue", "Wisconsin Avenue", "H Street", "Rock Creek",
+  "Union Station", "Southeast Freeway", "Southwest Freeway", "14th Street Bridge",
+  "Memorial Bridge", "Theodore Roosevelt Bridge", "Capitol Hill", "Ward 8", "Ward 7",
+]
+
+[regions.maryland]
+label = "Maryland"
+boost = 1.3
+keywords = [
+  "Maryland", "MDOT", "Maryland Department of Transportation", "Maryland Transit Administration",
+  "MDTA", "Montgomery County", "Prince George's", "Prince George's County", "Bethesda",
+  "Silver Spring", "Rockville", "Gaithersburg", "Germantown", "College Park", "Hyattsville",
+  "Greenbelt", "Laurel", "Bowie", "Largo", "National Harbor", "Frederick", "Annapolis", "Baltimore",
+  "I-270", "American Legion Bridge", "Woodrow Wilson Bridge", "Purple Line", "Intercounty Connector",
+  "ICC", "MARC", "Red Line", "Green Line", "Ride On", "Governor Moore", "Wes Moore",
+  "Maryland General Assembly", "Baltimore-Washington Parkway", "BW Parkway", "Route 355",
+  "New Hampshire Avenue", "Georgia Avenue", "Francis Scott Key Bridge", "Port of Baltimore",
+  "Flash BRT",
+]
+
+[regions.regional]
+label = "Region-wide and Metro"
+boost = 1.3
+keywords = [
+  "WMATA", "Metrorail", "Metrobus", "Metro board", "Metro General Manager", "Randy Clarke",
+  "Metro station", "Metro riders", "Metro ridership", "Metro fares", "Metro funding", "Metro's",
+  "Metropolitan Washington Council of Governments", "MWCOG", "Transportation Planning Board",
+  "TPB", "Washington region", "D.C. region", "DC region", "DMV", "Capital region",
+  "National Capital Region", "Potomac River", "Reagan National", "DCA", "Dulles International",
+  "IAD", "BWI", "MWAA", "Metropolitan Washington Airports Authority", "Better Bus",
+  "Washington Metrorail Safety Commission",
+]
+
+# ---------------------------------------------------------------------------
+# Jurisdiction tags for Washington-region items. Ordered most specific first (city and town
+# before county before state and regional bodies); a later entry replaces an earlier one
+# only when it has strictly more keyword hits. `region` limits an entry to one section.
+# ---------------------------------------------------------------------------
+
+[[jurisdiction]]
+label = "Alexandria"
+level = "city"
+region = "nova"
+keywords = ["Alexandria", "City of Alexandria", "DASH", "Potomac Yard", "Old Town", "Del Ray", "West End"]
+
+[[jurisdiction]]
+label = "Falls Church"
+level = "city"
+region = "nova"
+keywords = ["Falls Church", "City of Falls Church"]
+
+[[jurisdiction]]
+label = "City of Fairfax"
+level = "city"
+region = "nova"
+keywords = ["Fairfax City", "City of Fairfax"]
+
+[[jurisdiction]]
+label = "Manassas"
+level = "city"
+region = "nova"
+keywords = ["Manassas", "Manassas Park", "City of Manassas"]
+
+[[jurisdiction]]
+label = "Town of Herndon"
+level = "town"
+region = "nova"
+keywords = ["Herndon", "Town of Herndon"]
+
+[[jurisdiction]]
+label = "Town of Vienna"
+level = "town"
+region = "nova"
+keywords = ["Vienna", "Town of Vienna"]
+
+[[jurisdiction]]
+label = "Town of Leesburg"
+level = "town"
+region = "nova"
+keywords = ["Leesburg", "Town of Leesburg"]
+
+[[jurisdiction]]
+label = "Fairfax County"
+level = "county"
+region = "nova"
+keywords = [
+  "Fairfax County", "Fairfax Board of Supervisors", "Fairfax supervisors", "Fairfax Connector",
+  "Tysons", "Reston", "McLean", "Springfield", "Annandale", "Centreville", "Chantilly", "Lorton",
+  "Burke", "Mount Vernon", "Richmond Highway", "Fairfax County Parkway", "Fairfax",
+]
+
+[[jurisdiction]]
+label = "Arlington County"
+level = "county"
+region = "nova"
+keywords = [
+  "Arlington", "Arlington County", "Arlington County Board", "Crystal City", "National Landing",
+  "Pentagon City", "Rosslyn", "Ballston", "Clarendon", "Columbia Pike", "ART bus", "Shirlington",
+]
+
+[[jurisdiction]]
+label = "Loudoun County"
+level = "county"
+region = "nova"
+keywords = ["Loudoun", "Loudoun County", "Ashburn", "Sterling", "Dulles Greenway", "Purcellville", "South Riding"]
+
+[[jurisdiction]]
+label = "Prince William County"
+level = "county"
+region = "nova"
+keywords = [
+  "Prince William", "Prince William County", "Woodbridge", "Dale City", "OmniRide", "Gainesville",
+  "Haymarket", "Dumfries", "Bristow", "Prince William Parkway",
+]
+
+[[jurisdiction]]
+label = "Virginia"
+level = "state"
+region = "nova"
+keywords = [
+  "VDOT", "Virginia Department of Transportation", "Commonwealth Transportation Board", "CTB",
+  "Virginia General Assembly", "General Assembly", "Virginia Senate", "House of Delegates",
+  "Governor Spanberger", "Spanberger", "Richmond", "Smart Scale", "Virginia Passenger Rail Authority",
+  "VPRA", "Commonwealth", "Virginia",
+]
+
+[[jurisdiction]]
+label = "NVTA / NVTC / VRE"
+level = "regional"
+region = "nova"
+keywords = [
+  "NVTA", "Northern Virginia Transportation Authority", "NVTC", "Northern Virginia Transportation Commission",
+  "VRE", "Virginia Railway Express",
+]
+
+[[jurisdiction]]
+label = "District of Columbia"
+level = "city"
+region = "dc"
+keywords = ["DDOT", "D.C. Council", "DC Council", "Bowser", "D.C.", "DC", "District"]
+
+[[jurisdiction]]
+label = "Montgomery County"
+level = "county"
+region = "maryland"
+keywords = ["Montgomery County", "Bethesda", "Silver Spring", "Rockville", "Gaithersburg", "Germantown", "Ride On", "Wheaton", "Takoma Park"]
+
+[[jurisdiction]]
+label = "Prince George's County"
+level = "county"
+region = "maryland"
+keywords = ["Prince George's", "Prince George's County", "College Park", "Hyattsville", "Greenbelt", "Largo", "National Harbor", "Bowie", "Laurel", "Upper Marlboro"]
+
+[[jurisdiction]]
+label = "Frederick County"
+level = "county"
+region = "maryland"
+keywords = ["Frederick", "Frederick County"]
+
+[[jurisdiction]]
+label = "Baltimore"
+level = "city"
+region = "maryland"
+keywords = ["Baltimore", "Port of Baltimore", "Francis Scott Key Bridge"]
+
+[[jurisdiction]]
+label = "Maryland"
+level = "state"
+region = "maryland"
+keywords = ["MDOT", "Maryland Department of Transportation", "MDTA", "Maryland Transit Administration", "Maryland General Assembly", "Governor Moore", "Wes Moore", "Annapolis", "Maryland"]
+
+[[jurisdiction]]
+label = "WMATA"
+level = "regional"
+region = "regional"
+keywords = ["WMATA", "Metrorail", "Metrobus", "Metro board", "Randy Clarke", "Metro's", "Better Bus", "Washington Metrorail Safety Commission"]
+
+[[jurisdiction]]
+label = "MWCOG / TPB"
+level = "regional"
+region = "regional"
+keywords = ["Metropolitan Washington Council of Governments", "MWCOG", "Transportation Planning Board", "TPB"]
+
+[[jurisdiction]]
+label = "Airports Authority"
+level = "regional"
+region = "regional"
+keywords = ["MWAA", "Metropolitan Washington Airports Authority", "Reagan National", "DCA", "Dulles International", "IAD"]
+
+# ---------------------------------------------------------------------------
+# Items shown per section in the email. Unlisted dc_* sections use dc_default, us_* use
+# us_default. Northern Virginia gets the most room.
+# ---------------------------------------------------------------------------
+
+[limits]
+dc_nova = 10
+dc_dc = 5
+dc_maryland = 5
+dc_regional = 5
+us_default = 5
+world = 4
+
+# ---------------------------------------------------------------------------
+# Archive: the region's transportation history, delivered in chunks.
+#   anchor          the first day the archive ran; day 0 of the schedule. Do not change it
+#                   after launch, or the chunks shift.
+#   landmark_days   the first N days carry the tier-1 landmarks from archive.toml, in date
+#                   order, split evenly ("the most major ones for the first few days")
+#   start_week      afterwards, one historical week per day starting here (a Monday)
+#   weeks_per_day   raise to move through history faster
+#   order           forward (2016 onward) or backward (most recent full week first)
+#   query           Google News query for the historical week; after:/before: dates are appended
+#   max_items       items in the archive section
+# Landmarks dated inside the week being covered are shown alongside the searched coverage.
+# When the schedule reaches the present, the section switches to "this week in earlier years".
+# `news_digest.py archive-plan --days 10 --verbose` previews the schedule.
+# ---------------------------------------------------------------------------
+
+[archive]
+enabled = true
+anchor = "2026-09-16"
+landmark_days = 4
+start_week = "2016-01-04"
+weeks_per_day = 1
+order = "forward"
+max_items = 8
+landmarks_file = "archive.toml"
+query = '("Northern Virginia" OR Fairfax OR Arlington OR Loudoun OR "Prince William" OR Alexandria OR VDOT OR WMATA OR Metrorail OR "Express Lanes" OR "D.C." OR DDOT OR Maryland OR "Purple Line") (traffic OR transportation OR transit OR toll OR tolls OR highway OR commute OR Metro)'
+
+# ===========================================================================
+# Washington region: local sources (region = "dc")
+# ===========================================================================
+
+[[feed]]
+name = "WTOP Traffic"
+url = "https://wtop.com/traffic/feed/"
+topic = "transportation"
+region = "dc"
+subregion = "regional"
+weight = 1.2
+
+[[feed]]
+name = "WTOP Virginia"
+url = "https://wtop.com/virginia/feed/"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+
+[[feed]]
+name = "WTOP DC"
+url = "https://wtop.com/dc/feed/"
+topic = "auto"
+region = "dc"
+subregion = "dc"
+
+[[feed]]
+name = "WTOP Maryland"
+url = "https://wtop.com/maryland/feed/"
+topic = "auto"
+region = "dc"
+subregion = "maryland"
+
+[[feed]]
+name = "ARLnow"
+url = "https://www.arlnow.com/feed/"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+weight = 1.2
+
+[[feed]]
+name = "FFXnow"
+url = "https://www.ffxnow.com/feed/"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+weight = 1.2
+
+[[feed]]
+name = "ALXnow"
+url = "https://www.alxnow.com/feed/"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+weight = 1.2
+
+[[feed]]
+name = "Greater Greater Washington"
+url = "https://ggwash.org/rss"
+topic = "auto"
+region = "dc"
+subregion = "regional"
+weight = 1.2
+
+[[feed]]
+name = "InsideNoVA"
+url = "https://www.insidenova.com/search/?f=rss&t=article&l=50&s=start_time&sd=desc"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+
+[[feed]]
+name = "Fairfax County Times"
+url = "https://www.fairfaxtimes.com/search/?f=rss&t=article&l=50&s=start_time&sd=desc"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+
+[[feed]]
+name = "Loudoun Times-Mirror"
+url = "https://www.loudountimes.com/search/?f=rss&t=article&l=50&s=start_time&sd=desc"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+
+[[feed]]
+name = "Prince William Times"
+url = "https://www.princewilliamtimes.com/search/?f=rss&t=article&l=50&s=start_time&sd=desc"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+
+[[feed]]
+name = "Potomac Local"
+url = "https://www.potomaclocal.com/feed/"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+
+[[feed]]
+name = "Virginia Mercury"
+url = "https://virginiamercury.com/feed/"
+topic = "auto"
+region = "dc"
+subregion = "nova"
+weight = 1.1
+
+[[feed]]
+name = "Northern Virginia Transportation Authority"
+url = "https://thenovaauthority.org/feed/"
+topic = "transportation"
+region = "dc"
+subregion = "nova"
+weight = 1.3
+
+[[feed]]
+name = "Northern Virginia Transportation Commission"
+url = "https://novatransit.org/feed/"
+topic = "transportation"
+region = "dc"
+subregion = "nova"
+weight = 1.2
+
+[[feed]]
+name = "Coalition for Smarter Growth"
+url = "https://www.smartergrowth.net/feed/"
+topic = "transportation"
+region = "dc"
+subregion = "regional"
+weight = 0.8
+
+[[feed]]
+name = "Washington Post Local"
+url = "https://feeds.washingtonpost.com/rss/local"
+topic = "auto"
+region = "dc"
+subregion = "regional"
+weight = 1.1
+
+[[feed]]
+name = "WAMU"
+url = "https://wamu.org/feed/"
+topic = "auto"
+region = "dc"
+subregion = "regional"
+
+[[feed]]
+name = "WUSA9"
+url = "https://www.wusa9.com/feeds/syndication/rss/news/local"
+topic = "auto"
+region = "dc"
+subregion = "regional"
+weight = 0.9
+
+[[feed]]
+name = "NBC4 Washington"
+url = "https://www.nbcwashington.com/news/local/?rss=y"
+topic = "auto"
+region = "dc"
+subregion = "regional"
+weight = 0.9
+
+[[feed]]
+name = "Washington Business Journal"
+url = "https://feeds.bizjournals.com/bizj_washington"
+topic = "auto"
+region = "dc"
+subregion = "regional"
+weight = 0.9
+
+[[feed]]
+name = "Maryland Matters"
+url = "https://marylandmatters.org/feed/"
+topic = "auto"
+region = "dc"
+subregion = "maryland"
+
+[[feed]]
+name = "MoCo360"
+url = "https://moco360.media/feed/"
+topic = "auto"
+region = "dc"
+subregion = "maryland"
+weight = 0.9
+
+# Google News queries: local traffic and policy across every outlet, including the ones
+# without public feeds (Reuters, AP, Bloomberg, local TV, county papers, government pages).
+
+[[feed]]
+name = "Google News: Northern Virginia transportation"
+google_news = '("Northern Virginia" OR "Fairfax County" OR Arlington OR Loudoun OR "Prince William" OR Alexandria OR Tysons OR Reston) (traffic OR transportation OR transit OR toll OR "Express Lanes" OR VDOT OR Metro OR commute OR "bus rapid transit")'
+topic = "auto"
+region = "dc"
+subregion = "nova"
+weight = 1.2
+
+[[feed]]
+name = "Google News: Virginia state transportation policy"
+google_news = '(VDOT OR "Commonwealth Transportation Board" OR "Virginia General Assembly" OR "Smart Scale" OR "Virginia Passenger Rail" OR "Governor Spanberger") (transportation OR transit OR toll OR highway OR rail OR Metro OR "gas tax")'
+topic = "auto"
+region = "dc"
+subregion = "nova"
+weight = 1.1
+
+[[feed]]
+name = "Google News: Fairfax, Loudoun, Prince William local government"
+google_news = '("Fairfax County Board of Supervisors" OR "Loudoun County Board" OR "Prince William Board of County Supervisors" OR "Arlington County Board" OR "Alexandria City Council" OR "Falls Church" OR "Fairfax City Council") (road OR roads OR transportation OR transit OR parking OR "bike lane" OR bus OR toll OR traffic)'
+topic = "auto"
+region = "dc"
+subregion = "nova"
+weight = 1.1
+
+[[feed]]
+name = "Google News: WMATA and Metro"
+google_news = '(WMATA OR Metrorail OR Metrobus OR "Metro board" OR "Silver Line" OR "Better Bus") (funding OR fares OR ridership OR service OR safety OR budget OR closure)'
+topic = "transportation"
+region = "dc"
+subregion = "regional"
+
+[[feed]]
+name = "Google News: D.C. streets and policy"
+google_news = '(DDOT OR "D.C. Council" OR "Vision Zero" OR "Capital Bikeshare" OR "bus lane" OR "speed cameras") ("D.C." OR "Washington, D.C." OR District)'
+topic = "auto"
+region = "dc"
+subregion = "dc"
+
+[[feed]]
+name = "Google News: Maryland transportation"
+google_news = "(MDOT OR \"Purple Line\" OR \"I-270\" OR \"American Legion Bridge\" OR \"Montgomery County\" OR \"Prince George's\") (transportation OR transit OR toll OR traffic OR highway OR MARC OR \"Ride On\")"
+topic = "auto"
+region = "dc"
+subregion = "maryland"
+
+# ===========================================================================
+# United States: national outlets and topic specialists (region = "us")
+# ===========================================================================
+
+[[feed]]
+name = "NYT Business"
+url = "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"
+topic = "auto"
+weight = 0.9
+
+[[feed]]
+name = "NYT U.S."
+url = "https://rss.nytimes.com/services/xml/rss/nyt/US.xml"
+topic = "auto"
+weight = 0.9
+
+[[feed]]
+name = "NYT Climate"
+url = "https://rss.nytimes.com/services/xml/rss/nyt/Climate.xml"
+topic = "environment"
+
+[[feed]]
+name = "NYT Energy & Environment"
+url = "https://rss.nytimes.com/services/xml/rss/nyt/EnergyEnvironment.xml"
+topic = "auto"
+
+[[feed]]
+name = "WSJ U.S. Business"
+url = "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml"
+topic = "auto"
+weight = 0.9
+
+[[feed]]
+name = "WSJ Markets"
+url = "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"
+topic = "auto"
+weight = 0.7
+
+[[feed]]
+name = "Politico Energy"
+url = "https://rss.politico.com/energy.xml"
+topic = "energy"
+
+[[feed]]
+name = "The Hill Energy & Environment"
+url = "https://thehill.com/policy/energy-environment/feed/"
+topic = "auto"
+weight = 0.9
+
+[[feed]]
+name = "The Hill Transportation"
+url = "https://thehill.com/policy/transportation/feed/"
+topic = "transportation"
+weight = 0.9
+
+[[feed]]
+name = "Route Fifty"
+url = "https://www.route-fifty.com/rss/all/"
+topic = "auto"
+weight = 0.9
+
+[[feed]]
+name = "Transportation for America"
+url = "https://t4america.org/feed/"
+topic = "transportation"
+weight = 0.9
 
 [[feed]]
 name = "Transport Topics"
@@ -90,6 +688,7 @@ topic = "transportation"
 name = "FreightWaves"
 url = "https://www.freightwaves.com/news/feed"
 topic = "transportation"
+weight = 0.9
 
 [[feed]]
 name = "Streetsblog USA"
@@ -119,10 +718,6 @@ name = "Eno Center for Transportation"
 url = "https://www.enotrans.org/feed/"
 topic = "transportation"
 weight = 1.2
-
-# ---------------------------------------------------------------------------
-# Energy
-# ---------------------------------------------------------------------------
 
 [[feed]]
 name = "EIA Today in Energy"
@@ -163,10 +758,6 @@ url = "https://cleantechnica.com/feed/"
 topic = "auto"
 weight = 0.6
 
-# ---------------------------------------------------------------------------
-# Environment
-# ---------------------------------------------------------------------------
-
 [[feed]]
 name = "EPA News Releases"
 url = "https://www.epa.gov/newsreleases/search/rss"
@@ -185,27 +776,6 @@ topic = "environment"
 weight = 0.9
 
 [[feed]]
-name = "Carbon Brief"
-url = "https://www.carbonbrief.org/feed/"
-topic = "environment"
-
-[[feed]]
-name = "NYT Climate"
-url = "https://rss.nytimes.com/services/xml/rss/nyt/Climate.xml"
-topic = "environment"
-
-[[feed]]
-name = "NYT Energy & Environment"
-url = "https://rss.nytimes.com/services/xml/rss/nyt/EnergyEnvironment.xml"
-topic = "auto"
-
-[[feed]]
-name = "The Guardian Environment"
-url = "https://www.theguardian.com/environment/rss"
-topic = "environment"
-weight = 0.8
-
-[[feed]]
 name = "E&E News"
 url = "https://www.eenews.net/feed/"
 topic = "auto"
@@ -215,10 +785,6 @@ name = "Yale Environment 360"
 url = "https://e360.yale.edu/feed.xml"
 topic = "environment"
 weight = 0.9
-
-# ---------------------------------------------------------------------------
-# Industrial organization / antitrust / regulation
-# ---------------------------------------------------------------------------
 
 [[feed]]
 name = "FTC Competition Press Releases"
@@ -255,23 +821,80 @@ topic = "industrial_organization"
 weight = 0.9
 
 [[feed]]
-name = "UK Competition and Markets Authority"
-url = "https://www.gov.uk/government/organisations/competition-and-markets-authority.atom"
-topic = "industrial_organization"
-weight = 0.7
-
-# ---------------------------------------------------------------------------
-# General business / research feeds, classified by keyword
-# ---------------------------------------------------------------------------
-
-[[feed]]
-name = "NYT Business"
-url = "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"
-topic = "auto"
-weight = 0.9
-
-[[feed]]
 name = "NBER New Working Papers"
 url = "https://www.nber.org/rss/new.xml"
 topic = "auto"
 weight = 1.2
+
+[[feed]]
+name = "Google News: US antitrust and merger enforcement"
+google_news = '("Federal Trade Commission" OR FTC OR "Justice Department" OR "antitrust division") (antitrust OR merger OR monopoly OR "consent decree")'
+topic = "industrial_organization"
+
+[[feed]]
+name = "Google News: US energy markets and regulation"
+google_news = '(FERC OR "electricity prices" OR "power grid" OR "natural gas prices" OR "Energy Information Administration" OR "data centers" OR PJM) (rule OR prices OR outage OR approval OR policy)'
+topic = "energy"
+
+[[feed]]
+name = "Google News: US environmental policy"
+google_news = '(EPA OR "climate rule" OR emissions OR "Clean Air Act" OR "Clean Water Act" OR PFAS) (rule OR lawsuit OR court OR policy OR standard)'
+topic = "environment"
+
+[[feed]]
+name = "Google News: US transportation policy"
+google_news = '("Department of Transportation" OR FHWA OR NHTSA OR FAA OR "Federal Transit Administration" OR "transit agency" OR Amtrak OR "congestion pricing") (rule OR funding OR policy OR grant OR safety)'
+topic = "transportation"
+
+# ===========================================================================
+# World: a few major stories for context (region = "world"; capped by [limits].world)
+# ===========================================================================
+
+[[feed]]
+name = "The Guardian Environment"
+url = "https://www.theguardian.com/environment/rss"
+topic = "environment"
+region = "world"
+weight = 0.8
+
+[[feed]]
+name = "Carbon Brief"
+url = "https://www.carbonbrief.org/feed/"
+topic = "environment"
+region = "world"
+weight = 0.9
+
+[[feed]]
+name = "BBC Business"
+url = "http://feeds.bbci.co.uk/news/business/rss.xml"
+topic = "auto"
+region = "world"
+weight = 0.8
+
+[[feed]]
+name = "WSJ World"
+url = "https://feeds.a.dj.com/rss/RSSWorldNews.xml"
+topic = "auto"
+region = "world"
+weight = 0.8
+
+[[feed]]
+name = "NYT World"
+url = "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
+topic = "auto"
+region = "world"
+weight = 0.8
+
+[[feed]]
+name = "UK Competition and Markets Authority"
+url = "https://www.gov.uk/government/organisations/competition-and-markets-authority.atom"
+topic = "industrial_organization"
+region = "world"
+weight = 0.7
+
+[[feed]]
+name = "Google News: world energy, transport, competition policy"
+google_news = '("European Commission" OR "European Union" OR OPEC OR "International Energy Agency" OR "Competition and Markets Authority" OR China OR India OR Japan) (antitrust OR "energy policy" OR "electric vehicles" OR "carbon market" OR emissions OR "high-speed rail" OR "congestion charge")'
+topic = "auto"
+region = "world"
+weight = 0.8

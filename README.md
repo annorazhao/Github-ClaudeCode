@@ -171,7 +171,7 @@ The guide covers Claude Code's latest capabilities:
 
 ### One repo, many project types
 
-This workflow is designed as a **single hub for an entire research program** — not one paper at a time. The same `CLAUDE.md`, rules, agents, and quality gates serve courses and lectures, papers and referee reports, data analysis and replication packages, **Monte Carlo simulation studies** (`/simulation-study` + `sim-reviewer`), and the **R package release gate** (`/r-package-check` + `r-package-reviewer`) — all new in v1.10.0. A first personal-productivity workflow ships alongside them: a **daily news digest** emailed at 10:00 ET (`/news-digest` + `scripts/news_digest/`). *On the roadmap:* Stata / Python package checks (SSC / PyPI) and further personal-productivity workflows. See [`.claude/references/v2.0-backlog.md`](.claude/references/v2.0-backlog.md) for what's next.
+This workflow is designed as a **single hub for an entire research program** — not one paper at a time. The same `CLAUDE.md`, rules, agents, and quality gates serve courses and lectures, papers and referee reports, data analysis and replication packages, **Monte Carlo simulation studies** (`/simulation-study` + `sim-reviewer`), and the **R package release gate** (`/r-package-check` + `r-package-reviewer`) — all new in v1.10.0. A first personal-productivity workflow ships alongside them: a **daily news digest** emailed at 10:00 ET (`/news-digest` + `scripts/news_digest/`), with a regional-first layout and a history archive that are all configured in two TOML files. *On the roadmap:* Stata / Python package checks (SSC / PyPI) and further personal-productivity workflows. See [`.claude/references/v2.0-backlog.md`](.claude/references/v2.0-backlog.md) for what's next.
 
 ---
 
@@ -245,7 +245,7 @@ This workflow is designed as a **single hub for an entire research program** —
 | `/stata-replication` (v1.9.0) | End-to-end Stata pipeline via the `stata-mcp` MCP server (mirrors `/data-analysis` for R-first projects) |
 | `/simulation-study` (v1.10.0) | Scaffold + run a reproducible Monte Carlo study — parameterized DGP, estimator grid, seeded replications, bias/RMSE/coverage/size/power with Monte Carlo SEs |
 | `/r-package-check` (v1.10.0) | R package release gate — `devtools::document()` + tests + `R CMD check --as-cran`, triage ERROR/WARNING/NOTE vs CRAN policy, `r-package-reviewer` pass |
-| `/news-digest` | Daily news digest email — RSS collection on transportation, energy, environment, and industrial organization; Claude selects and summarizes; SMTP delivery; scheduled at 10:00 ET by a GitHub Actions cron or a Claude Code Routine |
+| `/news-digest` | Daily news digest email — Washington-region traffic and transportation policy first (Northern Virginia at state, county, and city level, then DC and Maryland), US news on transportation, energy, environment, and industrial organization, a few world items, and an archive section that walks through the region's transportation history; RSS + Google News collection, Claude summaries, SMTP delivery; 10:00 ET via GitHub Actions cron or a Claude Code Routine |
 
 ### Research Workflow
 

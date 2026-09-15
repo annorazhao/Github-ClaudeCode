@@ -2,8 +2,14 @@
 """
 news_digest.py — build and email a daily news digest.
 
-Topics (configured in feeds.toml): transportation, energy, environment, and industrial
-organization / antitrust. Sources are RSS / Atom feeds. Ranking and summaries come from
+Focus (configured in feeds.toml): the Washington region's traffic and transportation policy
+first, with Northern Virginia at state, county, and city level ahead of the District and
+Maryland; then United States news on transportation, energy, environment, and industrial
+organization; then a short world section; then an archive section that walks through the
+region's transportation history (curated landmarks for the first few days, then one
+historical week per day fetched from Google News with date operators).
+
+Sources are RSS / Atom feeds and Google News RSS queries. Ranking and summaries come from
 the Claude API when ANTHROPIC_API_KEY is set; otherwise items are ranked by keyword
 relevance and shown with the feed's own blurb.
 
@@ -12,6 +18,7 @@ Subcommands
   send         render a digest JSON -> HTML + text email -> SMTP (or write to --out)
   run          collect + summarize + send, end to end (what GitHub Actions runs)
   check-feeds  per-feed health report (HTTP status, item counts, parse errors)
+  archive-plan show which archive chunk today's (or a given day's) digest carries
 
 Environment (only needed for sending / AI summaries)
   SMTP_HOST, SMTP_PORT (587), SMTP_USERNAME, SMTP_PASSWORD
@@ -40,16 +47,16 @@ import smtplib
 import sys
 import tomllib
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "feeds.toml"
-USER_AGENT = "news-digest/1.0 (+https://github.com/; RSS reader for a daily research digest)"
+USER_AGENT = "news-digest/1.1 (+https://github.com/; RSS reader for a daily research digest)"
 FETCH_TIMEOUT = 20
 FETCH_WORKERS = 8
 SUMMARY_MAX_CHARS = 600
@@ -59,6 +66,17 @@ TRACKING_PARAMS = {
 }
 DEFAULT_MODEL = "claude-opus-5"
 DEFAULT_EFFORT = "medium"
+GN_SEARCH = "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
+
+GROUP_LABELS = {
+    "dc": "Washington region: traffic and transportation policy",
+    "us": "United States",
+    "world": "World",
+    "archive": "From the archive",
+}
+DEFAULT_LIMITS = {"world": 4, "archive": 8}
+DEFAULT_DC_LIMIT = 6
+DEFAULT_US_LIMIT = 5
 
 
 # --------------------------------------------------------------------------- data model
@@ -70,10 +88,14 @@ class Item:
     url: str
     source: str
     topic: str
+    section: str
     published: str          # ISO 8601, UTC
     summary: str
     score: float
     keyword_hits: int = 0
+    region: str = ""
+    jurisdiction: str = ""
+    level: str = ""
 
 
 @dataclass
@@ -81,6 +103,7 @@ class FeedHealth:
     name: str
     url: str
     topic: str
+    region: str = "us"
     status: str = "pending"  # ok | http-error | error | parse-error | empty
     http_status: int | None = None
     items_total: int = 0
@@ -95,45 +118,90 @@ class Collected:
     window_start: str
     lookback_hours: float
     timezone: str
-    topics: list[dict] = field(default_factory=list)      # [{key, label, items:[Item dict]}]
+    sections: list[dict] = field(default_factory=list)   # [{key, label, group, group_label, items}]
     feed_health: list[dict] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
+    archive: dict = field(default_factory=dict)          # plan + landmark items for today
 
 
 # --------------------------------------------------------------------------- config
+
+def google_news_url(query: str) -> str:
+    return GN_SEARCH.format(q=quote_plus(query))
+
 
 def load_config(path: Path | str = DEFAULT_CONFIG) -> dict:
     path = Path(path)
     with path.open("rb") as fh:
         cfg = tomllib.load(fh)
-    cfg.setdefault("settings", {})
-    s = cfg["settings"]
+    cfg["_path"] = path
+    s = cfg.setdefault("settings", {})
     s.setdefault("lookback_hours", 26)
-    s.setdefault("max_items_per_topic", 8)
-    s.setdefault("max_candidates_per_topic", 30)
+    s.setdefault("max_candidates_per_section", 25)
     s.setdefault("timezone", "America/New_York")
     s.setdefault("require_date", True)
-    if "topics" not in cfg or not cfg["topics"]:
+    s.setdefault("default_local_region", "regional")
+    s.setdefault("google_news_recency", "when:2d")
+    cfg["_traffic_regex"] = compile_keywords(s.get("traffic_keywords", []))
+
+    if not cfg.get("topics"):
         raise ValueError(f"{path}: no [topics.*] tables defined")
-    if "feed" not in cfg or not cfg["feed"]:
+    if not cfg.get("feed"):
         raise ValueError(f"{path}: no [[feed]] entries defined")
     for key, topic in cfg["topics"].items():
         topic.setdefault("label", key.replace("_", " ").title())
         topic["_regex"] = compile_keywords(topic.get("keywords", []))
+
+    cfg.setdefault("regions", {})
+    for key, region in cfg["regions"].items():
+        region.setdefault("label", key.replace("_", " ").title())
+        region.setdefault("boost", 1.0)
+        region["_regex"] = compile_keywords(region.get("keywords", []))
+        region["_exclude"] = compile_keywords(region.get("exclude", []))
+
+    cfg.setdefault("jurisdiction", [])
+    for j in cfg["jurisdiction"]:
+        for required in ("label", "level", "keywords"):
+            if required not in j:
+                raise ValueError(f"{path}: a [[jurisdiction]] entry is missing '{required}'")
+        j["_regex"] = compile_keywords(j["keywords"])
+
+    cfg.setdefault("sections", {})
+    cfg.setdefault("groups", {})
+    cfg.setdefault("limits", {})
+    a = cfg.setdefault("archive", {})
+    a.setdefault("enabled", True)
+    a.setdefault("anchor", date.today().isoformat())
+    a.setdefault("landmark_days", 4)
+    a.setdefault("start_week", "2016-01-04")
+    a.setdefault("weeks_per_day", 1)
+    a.setdefault("order", "forward")
+    a.setdefault("query", "")
+    a.setdefault("max_items", DEFAULT_LIMITS["archive"])
+    a.setdefault("landmarks_file", "archive.toml")
+
     for feed in cfg["feed"]:
-        for required in ("name", "url"):
-            if required not in feed:
-                raise ValueError(f"{path}: a [[feed]] entry is missing '{required}'")
+        if "name" not in feed:
+            raise ValueError(f"{path}: a [[feed]] entry is missing 'name'")
+        if "google_news" in feed and "url" not in feed:
+            feed["url"] = google_news_url(f"{feed['google_news']} {s['google_news_recency']}".strip())
+        if "url" not in feed:
+            raise ValueError(f"{path}: feed {feed['name']!r} needs 'url' or 'google_news'")
         feed.setdefault("topic", "auto")
+        feed.setdefault("region", "us")
         feed.setdefault("weight", 1.0)
         if feed["topic"] != "auto" and feed["topic"] not in cfg["topics"]:
             raise ValueError(f"{path}: feed {feed['name']!r} has unknown topic {feed['topic']!r}")
+        if feed["region"] not in ("us", "world", "dc"):
+            raise ValueError(f"{path}: feed {feed['name']!r} region must be us, world, or dc")
+        if feed.get("subregion") and feed["subregion"] not in cfg["regions"]:
+            raise ValueError(f"{path}: feed {feed['name']!r} has unknown subregion {feed['subregion']!r}")
     return cfg
 
 
 def compile_keywords(keywords: list[str]) -> tuple[re.Pattern | None, re.Pattern | None]:
     """Two patterns: case-insensitive words/phrases, and case-sensitive short acronyms
-    (e.g. "EV", "DOT", "COP") so that "cop" or "dot" in ordinary prose do not match."""
+    (e.g. "EV", "DOT", "COP", "DC") so that "cop" or "dot" in ordinary prose do not match."""
     insensitive, sensitive = [], []
     for kw in keywords:
         kw = kw.strip()
@@ -162,14 +230,70 @@ def keyword_hits(text: str, patterns: tuple[re.Pattern | None, re.Pattern | None
     return hits
 
 
-def classify(text: str, topics: dict) -> tuple[str, int]:
-    """Best topic by keyword hits. Returns ("", 0) when nothing matches."""
+def classify(text: str, tables: dict, exclude_key: str | None = None) -> tuple[str, int]:
+    """Best key by keyword hits (ties go to the earlier table). ("", 0) when nothing matches.
+    With exclude_key, each table's `exclude` pattern subtracts twice its hits."""
     best_key, best_hits = "", 0
-    for key, topic in topics.items():
-        hits = keyword_hits(text, topic["_regex"])
+    for key, table in tables.items():
+        hits = keyword_hits(text, table["_regex"])
+        if exclude_key and table.get(exclude_key) is not None:
+            hits -= 2 * keyword_hits(text, table[exclude_key])
         if hits > best_hits:
             best_key, best_hits = key, hits
     return best_key, best_hits
+
+
+LEVEL_RANK = {"town": 0, "city": 0, "county": 1, "state": 2, "regional": 3, "federal": 4}
+
+
+def detect_jurisdiction(text: str, cfg: dict, region: str) -> tuple[str, str]:
+    """Jurisdiction tag for a Washington-region item: the most specific level (town or
+    city, then county, then state, then regional) that has any keyword hit. Within a
+    level, more hits win; ties go to the earlier config entry. A story is tagged by where
+    it happens, so a VDOT project in Fairfax County reads "Fairfax County", not "Virginia"."""
+    best, best_key = None, None
+    for j in cfg["jurisdiction"]:
+        if j.get("region") and j["region"] != region:
+            continue
+        hits = keyword_hits(text, j["_regex"])
+        if not hits:
+            continue
+        key = (LEVEL_RANK.get(j["level"], 5), -hits)
+        if best_key is None or key < best_key:
+            best, best_key = j, key
+    if best is None:
+        return "", ""
+    return best["label"], best["level"]
+
+
+def section_plan(cfg: dict) -> list[dict]:
+    """Ordered sections for the email: dc_<region>… us_<topic>… world, archive."""
+    plan = []
+    for key, region in cfg["regions"].items():
+        plan.append({"key": f"dc_{key}", "label": cfg["sections"].get(f"dc_{key}", region["label"]),
+                     "group": "dc", "group_label": cfg["groups"].get("dc", GROUP_LABELS["dc"])})
+    for key, topic in cfg["topics"].items():
+        plan.append({"key": f"us_{key}", "label": cfg["sections"].get(f"us_{key}", topic["label"]),
+                     "group": "us", "group_label": cfg["groups"].get("us", GROUP_LABELS["us"])})
+    plan.append({"key": "world", "label": cfg["sections"].get("world", "Major stories elsewhere"),
+                 "group": "world", "group_label": cfg["groups"].get("world", GROUP_LABELS["world"])})
+    if cfg["archive"]["enabled"]:
+        plan.append({"key": "archive", "label": cfg["sections"].get("archive", "Region transportation history"),
+                     "group": "archive", "group_label": cfg["groups"].get("archive", GROUP_LABELS["archive"])})
+    return plan
+
+
+def cap_for(cfg: dict, key: str) -> int:
+    limits = cfg["limits"]
+    if key in limits:
+        return int(limits[key])
+    if key.startswith("dc_"):
+        return int(limits.get("dc_default", DEFAULT_DC_LIMIT))
+    if key.startswith("us_"):
+        return int(limits.get("us_default", DEFAULT_US_LIMIT))
+    if key == "archive":
+        return int(cfg["archive"].get("max_items", DEFAULT_LIMITS["archive"]))
+    return int(DEFAULT_LIMITS.get(key, DEFAULT_US_LIMIT))
 
 
 # --------------------------------------------------------------------------- text utils
@@ -185,7 +309,6 @@ def clean_text(raw: str | None, limit: int = SUMMARY_MAX_CHARS) -> str:
     text = _WS_RE.sub(" ", text).strip()
     if len(text) > limit:
         cut = text[:limit]
-        # cut at the last sentence end or word boundary, whichever is later and reasonable
         end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
         if end < limit // 2:
             end = cut.rfind(" ")
@@ -230,6 +353,14 @@ def entry_summary(entry) -> str:
     return clean_text(entry.get("summary") or entry.get("description") or "")
 
 
+def entry_source(entry, default: str) -> str:
+    """Google News items carry the real outlet in <source>; other feeds use the feed name."""
+    src = entry.get("source")
+    if isinstance(src, dict) and src.get("title"):
+        return clean_text(src["title"], 80)
+    return default
+
+
 # --------------------------------------------------------------------------- fetching
 
 def fetch_bytes(url: str, timeout: int = FETCH_TIMEOUT) -> tuple[bytes, int | None]:
@@ -251,6 +382,43 @@ def fetch_bytes(url: str, timeout: int = FETCH_TIMEOUT) -> tuple[bytes, int | No
     return resp.content, resp.status_code
 
 
+def classify_item(feed_cfg: dict, cfg: dict, text: str) -> dict | None:
+    """Decide where an item belongs. Returns None to drop it.
+
+    Rules:
+      world feeds      -> section "world" when a topic matches, else drop
+      any feed         -> a Washington-region section when region keywords hit AND the item
+                          is about transportation or traffic (local feeds default to their
+                          subregion when no region keyword resolves)
+      otherwise        -> the US section for the matched topic, else drop
+    """
+    topics = cfg["topics"]
+    if feed_cfg["topic"] == "auto":
+        topic, hits = classify(text, topics)
+    else:
+        topic = feed_cfg["topic"]
+        hits = keyword_hits(text, topics[topic]["_regex"])
+    traffic_hits = keyword_hits(text, cfg["_traffic_regex"])
+
+    if feed_cfg["region"] == "world":
+        if not topic:
+            return None
+        return {"section": "world", "topic": topic, "region": "", "hits": hits, "boost": 1.0}
+
+    region, rhits = classify(text, cfg["regions"], exclude_key="_exclude") if cfg["regions"] else ("", 0)
+    if feed_cfg["region"] == "dc" and not region:
+        region = feed_cfg.get("subregion") or cfg["settings"]["default_local_region"]
+        if region not in cfg["regions"]:
+            region = ""
+    transport_topic = "transportation" if "transportation" in topics else next(iter(topics))
+    if region and (topic == transport_topic or traffic_hits > 0):
+        return {"section": f"dc_{region}", "topic": transport_topic, "region": region,
+                "hits": hits + traffic_hits + rhits, "boost": float(cfg["regions"][region]["boost"])}
+    if topic:
+        return {"section": f"us_{topic}", "topic": topic, "region": "", "hits": hits, "boost": 1.0}
+    return None
+
+
 def parse_feed(feed_cfg: dict, cfg: dict, now: datetime, window_start: datetime) -> tuple[list[Item], FeedHealth]:
     """Fetch + parse one feed. Any exception is turned into a health record, so one
     misbehaving source can never abort the whole run."""
@@ -258,13 +426,15 @@ def parse_feed(feed_cfg: dict, cfg: dict, now: datetime, window_start: datetime)
         return _parse_feed(feed_cfg, cfg, now, window_start)
     except Exception as exc:  # noqa: BLE001
         return [], FeedHealth(name=feed_cfg["name"], url=feed_cfg["url"], topic=feed_cfg["topic"],
-                              status="error", error=f"{type(exc).__name__}: {exc}"[:200])
+                              region=feed_cfg.get("region", "us"), status="error",
+                              error=f"{type(exc).__name__}: {exc}"[:200])
 
 
 def _parse_feed(feed_cfg: dict, cfg: dict, now: datetime, window_start: datetime) -> tuple[list[Item], FeedHealth]:
     import feedparser  # lazy: keeps `send` usable in minimal environments
 
-    health = FeedHealth(name=feed_cfg["name"], url=feed_cfg["url"], topic=feed_cfg["topic"])
+    health = FeedHealth(name=feed_cfg["name"], url=feed_cfg["url"], topic=feed_cfg["topic"],
+                        region=feed_cfg.get("region", "us"))
     try:
         content, status = fetch_bytes(feed_cfg["url"])
         health.http_status = status
@@ -279,7 +449,6 @@ def _parse_feed(feed_cfg: dict, cfg: dict, now: datetime, window_start: datetime
     if not entries:
         head = content[:4096].lower()
         if not any(tag in head for tag in (b"<rss", b"<feed", b"<rdf")):
-            # An HTML page (login wall, 404 page, moved site) where a feed used to be.
             health.status = "parse-error"
             health.error = "response is not an RSS/Atom feed"
         elif parsed.get("bozo"):
@@ -289,7 +458,6 @@ def _parse_feed(feed_cfg: dict, cfg: dict, now: datetime, window_start: datetime
             health.status = "empty"
         return [], health
 
-    topics = cfg["topics"]
     require_date = bool(cfg["settings"].get("require_date", True))
     weight = float(feed_cfg.get("weight", 1.0))
     items: list[Item] = []
@@ -298,6 +466,9 @@ def _parse_feed(feed_cfg: dict, cfg: dict, now: datetime, window_start: datetime
         title = clean_text(entry.get("title") or "", limit=300)
         if not link or not title:
             continue
+        source = entry_source(entry, feed_cfg["name"])
+        if source != feed_cfg["name"] and title.endswith(" - " + source):
+            title = title[: -len(source) - 3].rstrip()
         published = entry_datetime(entry)
         if published is None:
             if require_date:
@@ -307,21 +478,21 @@ def _parse_feed(feed_cfg: dict, cfg: dict, now: datetime, window_start: datetime
             continue
         health.items_in_window += 1
         summary = entry_summary(entry)
-        text = f"{title}. {summary}"
-        if feed_cfg["topic"] == "auto":
-            topic, hits = classify(text, topics)
-            if not topic:
-                continue
-        else:
-            topic = feed_cfg["topic"]
-            hits = keyword_hits(text, topics[topic]["_regex"])
+        verdict = classify_item(feed_cfg, cfg, f"{title}. {summary}")
+        if verdict is None:
+            continue
         age_hours = (now - published).total_seconds() / 3600
         recency = 1.0 if age_hours <= 12 else 0.85 if age_hours <= 24 else 0.7
-        score = round(weight * (1.0 + 0.35 * min(hits, 6)) * recency, 4)
+        score = round(weight * verdict["boost"] * (1.0 + 0.35 * min(verdict["hits"], 6)) * recency, 4)
+        jurisdiction, level = ("", "")
+        if verdict["section"].startswith("dc_"):
+            jurisdiction, level = detect_jurisdiction(f"{title}. {summary}", cfg, verdict["region"])
         items.append(Item(
-            id=item_id(link), title=title, url=link, source=feed_cfg["name"], topic=topic,
+            id=item_id(link), title=title, url=link, source=source, topic=verdict["topic"],
+            section=verdict["section"],
             published=published.astimezone(timezone.utc).isoformat(timespec="seconds"),
-            summary=summary, score=score, keyword_hits=hits,
+            summary=summary, score=score, keyword_hits=verdict["hits"], region=verdict["region"],
+            jurisdiction=jurisdiction, level=level,
         ))
     health.items_kept = len(items)
     health.status = "ok"
@@ -346,60 +517,257 @@ def dedupe(items: list[Item]) -> list[Item]:
     return list(best.values())
 
 
+def fetch_all(feeds: list[dict], cfg: dict, now: datetime, window_start: datetime) -> tuple[list[Item], list[FeedHealth]]:
+    items: list[Item] = []
+    health: list[FeedHealth] = []
+    with cf.ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+        futures = [pool.submit(parse_feed, f, cfg, now, window_start) for f in feeds]
+        for fut in cf.as_completed(futures):
+            got, h = fut.result()
+            items.extend(got)
+            health.append(h)
+    return items, health
+
+
 def collect(cfg: dict, hours: float | None = None, now: datetime | None = None,
-            only_topics: list[str] | None = None) -> Collected:
+            only_sections: list[str] | None = None, archive: bool = True,
+            archive_day: int | None = None, archive_week: str | None = None) -> Collected:
     now = now or datetime.now(timezone.utc)
     hours = float(hours or cfg["settings"]["lookback_hours"])
     window_start = now - timedelta(hours=hours)
-    feeds = cfg["feed"]
-    if only_topics:
-        feeds = [f for f in feeds if f["topic"] == "auto" or f["topic"] in only_topics]
+    tz = ZoneInfo(cfg["settings"]["timezone"])
+    plan = section_plan(cfg)
+    wanted = {p["key"] for p in plan}
+    if only_sections:
+        wanted = {k for k in wanted if k in only_sections or k.split("_")[0] in only_sections}
 
-    all_items: list[Item] = []
-    health: list[FeedHealth] = []
-    with cf.ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
-        futures = {pool.submit(parse_feed, f, cfg, now, window_start): f for f in feeds}
-        for fut in cf.as_completed(futures):
-            items, h = fut.result()
-            all_items.extend(items)
-            health.append(h)
-    health.sort(key=lambda h: (h.status != "ok", h.name.lower()))
-
+    all_items, health = fetch_all(cfg["feed"], cfg, now, window_start)
     deduped = dedupe(all_items)
-    cap = int(cfg["settings"]["max_candidates_per_topic"])
-    topics_out = []
-    for key, topic in cfg["topics"].items():
-        if only_topics and key not in only_topics:
+    cap_candidates = int(cfg["settings"]["max_candidates_per_section"])
+
+    archive_info: dict = {"phase": "off"}
+    archive_items: list[Item] = []
+    if archive and cfg["archive"]["enabled"] and "archive" in wanted:
+        landmarks = load_landmarks(cfg)
+        archive_info = archive_plan(cfg, now.astimezone(tz).date(), landmarks,
+                                    day_override=archive_day, week_override=archive_week)
+        archive_items, archive_health = archive_collect(cfg, archive_info, now)
+        health.extend(archive_health)
+        archive_items = dedupe(archive_items)
+        archive_info["landmark_items"] = [landmark_to_item(l, cfg) for l in archive_info.pop("landmarks", [])]
+
+    health.sort(key=lambda h: (h.status != "ok", h.name.lower()))
+    sections_out = []
+    for p in plan:
+        if p["key"] not in wanted:
             continue
-        chosen = sorted((i for i in deduped if i.topic == key), key=lambda i: i.score, reverse=True)[:cap]
-        topics_out.append({"key": key, "label": topic["label"], "items": [asdict(i) for i in chosen]})
+        pool = archive_items if p["key"] == "archive" else [i for i in deduped if i.section == p["key"]]
+        chosen = sorted(pool, key=lambda i: i.score, reverse=True)[:cap_candidates]
+        sections_out.append({**p, "items": [asdict(i) for i in chosen]})
 
     stats = {
         "feeds": len(health),
         "feeds_ok": sum(1 for h in health if h.status == "ok"),
         "items_total": sum(h.items_total for h in health),
         "items_in_window": sum(h.items_in_window for h in health),
-        "items_kept": len(deduped),
-        "items_offered": sum(len(t["items"]) for t in topics_out),
+        "items_kept": len(deduped) + len(archive_items),
+        "items_offered": sum(len(s["items"]) for s in sections_out),
     }
     return Collected(
         generated_at=now.isoformat(timespec="seconds"),
         window_start=window_start.isoformat(timespec="seconds"),
         lookback_hours=hours,
         timezone=cfg["settings"]["timezone"],
-        topics=topics_out,
+        sections=sections_out,
         feed_health=[asdict(h) for h in health],
         stats=stats,
+        archive=archive_info,
     )
+
+
+# --------------------------------------------------------------------------- archive
+
+def parse_landmark_date(raw: str) -> tuple[date, str]:
+    raw = str(raw).strip()
+    if re.fullmatch(r"\d{4}", raw):
+        return date(int(raw), 7, 1), "year"
+    if re.fullmatch(r"\d{4}-\d{2}", raw):
+        y, m = raw.split("-")
+        return date(int(y), int(m), 15), "month"
+    return date.fromisoformat(raw), "day"
+
+
+def load_landmarks(cfg: dict) -> list[dict]:
+    path = Path(cfg["archive"]["landmarks_file"])
+    if not path.is_absolute():
+        path = Path(cfg["_path"]).parent / path
+    if not path.exists():
+        return []
+    with path.open("rb") as fh:
+        data = tomllib.load(fh)
+    out = []
+    for raw in data.get("landmark", []):
+        for required in ("date", "title", "summary"):
+            if required not in raw:
+                raise ValueError(f"{path}: a [[landmark]] entry is missing '{required}'")
+        d, precision = parse_landmark_date(raw["date"])
+        out.append({**raw, "_date": d, "precision": precision, "tier": int(raw.get("tier", 2)),
+                    "confidence": raw.get("confidence", "high"), "jurisdiction": raw.get("jurisdiction", ""),
+                    "level": raw.get("level", ""), "query": raw.get("query", raw["title"])})
+    out.sort(key=lambda l: l["_date"])
+    return out
+
+
+def landmarks_in_week(landmarks: list[dict], week_start: date) -> list[dict]:
+    week_end = week_start + timedelta(days=7)
+    return [l for l in landmarks if week_start <= l["_date"] < week_end]
+
+
+def landmarks_this_week_in_history(landmarks: list[dict], today: date) -> list[dict]:
+    lo, hi = today - timedelta(days=3), today + timedelta(days=3)
+    out = []
+    for l in landmarks:
+        if l["precision"] != "day":
+            continue
+        try:
+            same_year = l["_date"].replace(year=today.year)
+        except ValueError:  # Feb 29
+            continue
+        if lo <= same_year <= hi:
+            out.append(l)
+    return out
+
+
+def archive_plan(cfg: dict, today: date, landmarks: list[dict],
+                 day_override: int | None = None, week_override: str | None = None) -> dict:
+    """Stateless schedule: day d since `anchor` decides what the archive section carries.
+      d < landmark_days      -> tier-1 landmarks in date order, split evenly ("landmarks")
+      afterwards             -> one historical week per day from start_week ("week"),
+                                merged with landmarks dated in that week
+      past the last full week-> landmarks from this calendar week in earlier years
+    """
+    a = cfg["archive"]
+    if not a["enabled"]:
+        return {"phase": "off"}
+    if week_override:
+        ws = date.fromisoformat(week_override)
+        ws -= timedelta(days=ws.weekday())
+        return _week_plan(ws, landmarks, index=None, total=None)
+    anchor = date.fromisoformat(str(a["anchor"]))
+    d = day_override if day_override is not None else (today - anchor).days
+    if d < 0:
+        return {"phase": "off", "title": f"Archive starts {anchor.isoformat()}"}
+    n = int(a["landmark_days"])
+    tier1 = [l for l in landmarks if l["tier"] == 1]
+    if d < n and tier1:
+        lo, hi = d * len(tier1) // n, (d + 1) * len(tier1) // n
+        chunk = tier1[lo:hi]
+        span = f"{chunk[0]['_date'].year} to {chunk[-1]['_date'].year}" if chunk else ""
+        return {"phase": "landmarks", "part": d + 1, "of": n, "landmarks": chunk,
+                "title": f"Landmarks, part {d + 1} of {n} ({span})" if span else f"Landmarks, part {d + 1} of {n}",
+                "note": "The most consequential policy and infrastructure events for the region's traffic, "
+                        "presented before the week-by-week archive begins. Each entry links to a dated web "
+                        "search for contemporary coverage."}
+    start_week = date.fromisoformat(str(a["start_week"]))
+    start_week -= timedelta(days=start_week.weekday())
+    last_week = today - timedelta(days=today.weekday() + 7)
+    total = max(0, (last_week - start_week).days // 7 + 1)
+    w = (d - n) * int(a["weeks_per_day"])
+    if w >= total:
+        hits = landmarks_this_week_in_history(landmarks, today)
+        return {"phase": "anniversary", "landmarks": hits,
+                "title": "This week in earlier years",
+                "note": "The week-by-week archive has reached the present. Landmarks that fall in this "
+                        "calendar week are shown."}
+    ws = start_week + timedelta(days=7 * w) if a["order"] != "backward" else last_week - timedelta(days=7 * w)
+    return _week_plan(ws, landmarks, index=w + 1, total=total)
+
+
+def _week_plan(ws: date, landmarks: list[dict], index: int | None, total: int | None) -> dict:
+    we = ws + timedelta(days=7)
+    label = ws.strftime("%B %d, %Y").replace(" 0", " ")
+    title = f"Week of {label}" + (f" ({index} of {total})" if index and total else "")
+    return {"phase": "week", "week_start": ws.isoformat(), "week_end": we.isoformat(),
+            "index": index, "of": total, "landmarks": landmarks_in_week(landmarks, ws), "title": title,
+            "note": "Coverage of the region's traffic and transportation policy from that week, found "
+                    "through a dated news search, plus any curated landmarks dated in the week."}
+
+
+def coverage_search_url(query: str, d: date, precision: str) -> str:
+    if precision == "day":
+        lo, hi = d - timedelta(days=21), d + timedelta(days=21)
+    elif precision == "month":
+        lo, hi = d.replace(day=1) - timedelta(days=10), d.replace(day=28) + timedelta(days=14)
+    else:
+        lo, hi = date(d.year, 1, 1), date(d.year, 12, 31)
+    fmt = lambda x: x.strftime("%m/%d/%Y")
+    return f"https://www.google.com/search?q={quote_plus(query)}&tbs=cdr:1,cd_min:{fmt(lo)},cd_max:{fmt(hi)}"
+
+
+def landmark_date_label(l: dict) -> str:
+    d = l["_date"]
+    if l["precision"] == "day":
+        return d.strftime("%B %d, %Y").replace(" 0", " ")
+    if l["precision"] == "month":
+        return d.strftime("%B %Y")
+    return str(d.year)
+
+
+def landmark_to_item(l: dict, cfg: dict) -> dict:
+    return {
+        "kind": "landmark",
+        "headline": l["title"],
+        "url": l.get("url", ""),
+        "coverage_url": coverage_search_url(l["query"], l["_date"], l["precision"]),
+        "source": "Curated landmark",
+        "published": "",
+        "event_date": l["_date"].isoformat(),
+        "date_label": landmark_date_label(l),
+        "jurisdiction": l.get("jurisdiction", ""),
+        "level": l.get("level", ""),
+        "summary": l["summary"],
+        "why_it_matters": l.get("why_it_matters", ""),
+        "confidence": l.get("confidence", "high"),
+        "tier": l.get("tier", 2),
+    }
+
+
+def archive_collect(cfg: dict, plan: dict, now: datetime) -> tuple[list[Item], list[FeedHealth]]:
+    """Fetch the historical week's coverage from Google News (date operators), classify it
+    with the same rules as live news, and mark everything as the archive section."""
+    if plan.get("phase") != "week" or not cfg["archive"].get("query"):
+        return [], []
+    ws = date.fromisoformat(plan["week_start"])
+    we = date.fromisoformat(plan["week_end"])
+    query = f"{cfg['archive']['query']} after:{ws.isoformat()} before:{we.isoformat()}"
+    feed_cfg = {"name": f"Google News archive ({plan['week_start']})", "url": google_news_url(query),
+                "topic": "auto", "region": "dc", "subregion": cfg["settings"]["default_local_region"],
+                "weight": 1.0}
+    if feed_cfg["subregion"] not in cfg["regions"]:
+        feed_cfg.pop("subregion")
+    week_start_dt = datetime(ws.year, ws.month, ws.day, tzinfo=timezone.utc)
+    week_end_dt = datetime(we.year, we.month, we.day, tzinfo=timezone.utc)
+    items, health = parse_feed(feed_cfg, cfg, now=week_end_dt, window_start=week_start_dt)
+    kept = []
+    for it in items:
+        if it.section.startswith("dc_") or it.topic == "transportation":
+            it.section = "archive"
+            kept.append(it)
+    health.items_kept = len(kept)
+    return kept, [health]
 
 
 # --------------------------------------------------------------------------- summarizing
 
-SYSTEM_PROMPT = """You compile a daily news digest for an academic economist whose research spans transportation, energy, environment, and industrial organization / antitrust.
+SYSTEM_PROMPT = """You compile a daily news digest for an academic economist whose research spans transportation, energy, environment, and industrial organization / antitrust, and who uses the digest to gather research ideas.
 
-You receive candidate items collected from RSS feeds in the last day, grouped by topic. Each item has an id, title, source, publication time, URL, and the feed's own blurb.
+The digest has four groups, in this order of priority:
+1. Washington region traffic and transportation policy, split into Northern Virginia (the top priority: state, county, and city or town actions, road and transit conditions, tolling, transit funding), the District of Columbia, Maryland, and region-wide bodies such as WMATA. Prefer concrete policy actions, project milestones, funding decisions, enforcement changes, data releases, and notable local reporting over routine incident reports; a single crash is rarely worth including unless it changed policy or closed a corridor for a long time.
+2. United States news on each topic: policy and regulatory actions, enforcement cases and court decisions, market and price moves, major corporate decisions, data releases, and notable research.
+3. Major stories elsewhere in the world: a few items only, chosen for research relevance rather than completeness.
+4. An archive section when present: coverage from one historical week, summarized as a short retrospective (write in the past tense and mention the year).
 
-Select and summarize. Prefer substantive developments: policy and regulatory actions, market and price movements, enforcement cases, court decisions, major corporate decisions, new data releases, and notable research. Skip marketing, listicles, opinion with no news, and near-duplicates of a story already chosen (in any section). Balance sources; do not let one outlet dominate a section.
+You receive candidate items grouped by section. Each item has an id, title, source, publication time, URL, and the feed's own blurb. Select and summarize. Skip marketing, listicles, opinion with no news, and near-duplicates of a story already chosen in any section. Balance sources; do not let one outlet dominate a section.
 
 Ground every summary strictly in the provided title and blurb. Do not add facts, numbers, or names that are not in the input. If a blurb is thin, keep the summary short rather than speculating. Never invent items: every id you return must come from the input.
 
@@ -411,14 +779,14 @@ DIGEST_SCHEMA = {
     "properties": {
         "top_line": {
             "type": "string",
-            "description": "Three to five sentences on the day's most consequential developments across all sections.",
+            "description": "Three to five sentences on the day's most consequential developments, leading with the Washington region when it has substantive news.",
         },
         "sections": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string"},
+                    "section": {"type": "string", "description": "section key copied from the input"},
                     "items": {
                         "type": "array",
                         "items": {
@@ -427,14 +795,14 @@ DIGEST_SCHEMA = {
                                 "id": {"type": "string", "description": "id copied verbatim from the input"},
                                 "headline": {"type": "string", "description": "Concise headline; may lightly rephrase the title"},
                                 "summary": {"type": "string", "description": "Two or three sentences grounded in the blurb"},
-                                "why_it_matters": {"type": "string", "description": "One sentence on relevance to research or policy in this field; empty string if nothing non-obvious to say"},
+                                "why_it_matters": {"type": "string", "description": "One sentence on relevance to research or policy; empty string if nothing non-obvious to say"},
                             },
                             "required": ["id", "headline", "summary", "why_it_matters"],
                             "additionalProperties": False,
                         },
                     },
                 },
-                "required": ["topic", "items"],
+                "required": ["section", "items"],
                 "additionalProperties": False,
             },
         },
@@ -446,29 +814,31 @@ DIGEST_SCHEMA = {
 
 def _candidates_for_prompt(collected: Collected) -> dict:
     out = {}
-    for t in collected.topics:
-        out[t["key"]] = [
-            {"id": i["id"], "title": i["title"], "source": i["source"], "published": i["published"],
-             "url": i["url"], "blurb": i["summary"]}
-            for i in t["items"]
-        ]
+    for s in collected.sections:
+        out[s["key"]] = {
+            "label": f"{s['group_label']} / {s['label']}",
+            "max_items": None,  # filled by caller
+            "items": [
+                {"id": i["id"], "title": i["title"], "source": i["source"], "published": i["published"],
+                 "url": i["url"], "blurb": i["summary"],
+                 **({"jurisdiction": i["jurisdiction"]} if i.get("jurisdiction") else {})}
+                for i in s["items"]
+            ],
+        }
     return out
 
 
 def map_claude_output(data: dict, collected: Collected, cfg: dict) -> dict:
-    """Turn the model's {id, headline, summary, why_it_matters} picks into full digest
-    sections, resolving each id against the collected items so URLs, sources, and
-    timestamps come from the feed and never from the model."""
-    by_id = {i["id"]: i for t in collected.topics for i in t["items"]}
-    labels = {t["key"]: t["label"] for t in collected.topics}
-    max_items = int(cfg["settings"]["max_items_per_topic"])
-    picked_sections = {s.get("topic"): s.get("items", []) for s in data.get("sections", [])}
+    """Turn the model's picks into full digest sections, resolving each id against the
+    collected items so URLs, sources, and timestamps come from the feed, never the model."""
+    by_id = {i["id"]: i for s in collected.sections for i in s["items"]}
+    picked = {s.get("section") or s.get("topic"): s.get("items", []) for s in data.get("sections", [])}
     seen: set[str] = set()
     sections = []
-    for t in collected.topics:
-        key = t["key"]
+    for s in collected.sections:
+        key = s["key"]
         items_out = []
-        for pick in picked_sections.get(key, []):
+        for pick in picked.get(key, []):
             src = by_id.get(pick.get("id"))
             if src is None or src["id"] in seen:
                 continue
@@ -480,10 +850,13 @@ def map_claude_output(data: dict, collected: Collected, cfg: dict) -> dict:
                 "published": src["published"],
                 "summary": (pick.get("summary") or src["summary"]).strip(),
                 "why_it_matters": (pick.get("why_it_matters") or "").strip(),
+                "jurisdiction": src.get("jurisdiction", ""),
+                "level": src.get("level", ""),
             })
-            if len(items_out) >= max_items:
+            if len(items_out) >= cap_for(cfg, key):
                 break
-        sections.append({"topic": key, "label": labels.get(key, key), "items": items_out})
+        sections.append({"section": key, "label": s["label"], "group": s["group"],
+                         "group_label": s["group_label"], "items": items_out})
     return {"top_line": (data.get("top_line") or "").strip(), "sections": sections}
 
 
@@ -497,13 +870,14 @@ def summarize_with_claude(collected: Collected, cfg: dict) -> dict | None:
         return None
     model = os.environ.get("DIGEST_MODEL", DEFAULT_MODEL)
     effort = os.environ.get("DIGEST_EFFORT", DEFAULT_EFFORT)
-    max_items = int(cfg["settings"]["max_items_per_topic"])
     payload = _candidates_for_prompt(collected)
-    if not any(payload.values()):
+    for key in payload:
+        payload[key]["max_items"] = cap_for(cfg, key)
+    if not any(v["items"] for v in payload.values()):
         return None
     user_text = (
-        f"Date: {collected.generated_at}. Pick up to {max_items} items per section, ordered by importance. "
-        f"Sections and their keys: " + ", ".join(f"{t['label']} = {t['key']}" for t in collected.topics) + ".\n\n"
+        f"Date: {collected.generated_at}. For each section pick up to its max_items, ordered by importance; "
+        "return every section key even when you pick nothing for it.\n\n"
         "Candidates (JSON):\n" + json.dumps(payload, ensure_ascii=False, indent=1)
     )
     output_config: dict = {"format": {"type": "json_schema", "schema": DIGEST_SCHEMA}}
@@ -548,17 +922,17 @@ def summarize_with_claude(collected: Collected, cfg: dict) -> dict | None:
 
 
 def summarize_fallback(collected: Collected, cfg: dict) -> dict:
-    max_items = int(cfg["settings"]["max_items_per_topic"])
     sections = []
-    for t in collected.topics:
+    for s in collected.sections:
         items = []
-        for i in t["items"][:max_items]:
+        for i in s["items"][: cap_for(cfg, s["key"])]:
             items.append({
                 "headline": i["title"], "url": i["url"], "source": i["source"],
                 "published": i["published"], "summary": clean_text(i["summary"], 320),
-                "why_it_matters": "",
+                "why_it_matters": "", "jurisdiction": i.get("jurisdiction", ""), "level": i.get("level", ""),
             })
-        sections.append({"topic": t["key"], "label": t["label"], "items": items})
+        sections.append({"section": s["key"], "label": s["label"], "group": s["group"],
+                         "group_label": s["group_label"], "items": items})
     n = sum(len(s["items"]) for s in sections)
     top_line = (
         f"{n} items selected by keyword relevance from {collected.stats.get('feeds_ok', 0)} sources "
@@ -568,12 +942,31 @@ def summarize_fallback(collected: Collected, cfg: dict) -> dict:
     return {"top_line": top_line, "sections": sections, "generated_by": "keyword-fallback"}
 
 
+def merge_archive(digest: dict, archive: dict, cfg: dict) -> None:
+    """Attach the archive plan's landmarks and note to the digest's archive section,
+    creating the section if the summarizer (or a Claude session) left it out."""
+    if not archive or archive.get("phase") in (None, "off"):
+        return
+    section = next((s for s in digest["sections"] if (s.get("section") or s.get("topic")) == "archive"), None)
+    if section is None:
+        section = {"section": "archive", "label": cfg["sections"].get("archive", "Region transportation history"),
+                   "group": "archive", "group_label": cfg["groups"].get("archive", GROUP_LABELS["archive"]),
+                   "items": []}
+        digest["sections"].append(section)
+    section.setdefault("note", archive.get("note", ""))
+    section["title"] = archive.get("title", "")
+    existing = {i.get("headline") for i in section["items"] if i.get("kind") == "landmark"}
+    landmarks = [l for l in archive.get("landmark_items", []) if l["headline"] not in existing]
+    section["items"] = landmarks + section["items"]
+
+
 def build_digest(collected: Collected, cfg: dict, use_ai: bool = True) -> dict:
     digest = None
     if use_ai and os.environ.get("ANTHROPIC_API_KEY"):
         digest = summarize_with_claude(collected, cfg)
     if digest is None:
         digest = summarize_fallback(collected, cfg)
+    merge_archive(digest, collected.archive, cfg)
     tz = ZoneInfo(cfg["settings"]["timezone"])
     digest["date"] = datetime.fromisoformat(collected.generated_at).astimezone(tz).strftime("%Y-%m-%d")
     digest["feed_health"] = collected.feed_health
@@ -588,13 +981,30 @@ def validate_digest(digest: dict) -> None:
     if not isinstance(digest, dict) or "sections" not in digest:
         raise ValueError("digest JSON must be an object with a 'sections' list")
     for s in digest["sections"]:
-        for k in ("topic", "items"):
-            if k not in s:
-                raise ValueError(f"section is missing '{k}': {s}")
+        if not (s.get("section") or s.get("topic")):
+            raise ValueError(f"section is missing 'section': {s}")
+        if "items" not in s:
+            raise ValueError(f"section is missing 'items': {s}")
         for i in s["items"]:
-            for k in ("headline", "url"):
-                if not i.get(k):
-                    raise ValueError(f"item is missing '{k}': {i}")
+            if not i.get("headline"):
+                raise ValueError(f"item is missing 'headline': {i}")
+            if not (i.get("url") or i.get("coverage_url")):
+                raise ValueError(f"item is missing 'url': {i}")
+
+
+def normalize_sections(digest: dict, cfg: dict) -> None:
+    """Fill label/group for sections written by hand (e.g. by a Claude session) and put
+    them in the configured order."""
+    plan = {p["key"]: p for p in section_plan(cfg)}
+    for s in digest["sections"]:
+        key = s.get("section") or s.get("topic")
+        s["section"] = key
+        meta = plan.get(key, {"label": key, "group": "us", "group_label": GROUP_LABELS["us"]})
+        s.setdefault("label", meta["label"])
+        s.setdefault("group", meta["group"])
+        s.setdefault("group_label", meta["group_label"])
+    order = list(plan)
+    digest["sections"].sort(key=lambda s: order.index(s["section"]) if s["section"] in order else len(order))
 
 
 def fmt_time(iso: str | None, tz: ZoneInfo) -> str:
@@ -611,18 +1021,46 @@ def fmt_time(iso: str | None, tz: ZoneInfo) -> str:
 
 
 def digest_date_label(digest: dict, tz: ZoneInfo) -> str:
-    date = digest.get("date")
+    raw = digest.get("date")
     try:
-        d = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now(tz)
+        d = datetime.strptime(raw, "%Y-%m-%d") if raw else datetime.now(tz)
     except ValueError:
         d = datetime.now(tz)
     return d.strftime("%A, %B %d, %Y").replace(" 0", " ")
 
 
 def subject_line(digest: dict, tz: ZoneInfo) -> str:
-    labels = [s.get("label") or s["topic"] for s in digest["sections"] if s.get("items")]
-    short = ", ".join(l.split(" &")[0].split(" /")[0] for l in labels) or "no new items"
-    return f"News digest {digest_date_label(digest, tz)}: {short}"
+    dc_n = sum(len(s["items"]) for s in digest["sections"] if s.get("group") == "dc")
+    us_n = sum(len(s["items"]) for s in digest["sections"] if s.get("group") == "us")
+    archive = next((s for s in digest["sections"] if s.get("section") == "archive"), None)
+    parts = []
+    if dc_n:
+        parts.append(f"{dc_n} DC-region")
+    if us_n:
+        parts.append(f"{us_n} US")
+    tail = ", ".join(parts) or "no new items"
+    if archive and archive.get("title"):
+        tail += f"; archive: {archive['title'].split(' (')[0]}"
+    return f"News digest {digest_date_label(digest, tz)}: {tail}"
+
+
+def item_meta(i: dict, tz: ZoneInfo) -> list[str]:
+    bits = []
+    if i.get("kind") == "landmark":
+        bits.append("Landmark")
+        if i.get("date_label"):
+            bits.append(i["date_label"])
+    else:
+        if i.get("source"):
+            bits.append(i["source"])
+        if i.get("published"):
+            bits.append(fmt_time(i["published"], tz))
+    if i.get("jurisdiction"):
+        lvl = f" ({i['level']})" if i.get("level") else ""
+        bits.append(f"{i['jurisdiction']}{lvl}")
+    if i.get("kind") == "landmark" and i.get("confidence") == "medium":
+        bits.append("details to verify")
+    return bits
 
 
 def render_html(digest: dict, cfg: dict) -> str:
@@ -634,33 +1072,42 @@ def render_html(digest: dict, cfg: dict) -> str:
         f"<title>{e(subject_line(digest, tz))}</title></head>",
         "<body style='margin:0;padding:0;background:#f4f4f2;font-family:Georgia,\"Times New Roman\",serif;color:#1f1f1f;'>",
         "<div style='max-width:680px;margin:0 auto;padding:24px 16px;background:#ffffff;'>",
-        f"<h1 style='font-size:22px;margin:0 0 4px 0;'>Daily news digest</h1>",
+        "<h1 style='font-size:22px;margin:0 0 4px 0;'>Daily news digest</h1>",
         f"<div style='color:#666;font-size:13px;margin-bottom:18px;'>{e(digest_date_label(digest, tz))}"
-        f" &middot; transportation, energy, environment, industrial organization</div>",
+        " &middot; Washington region traffic and policy &middot; US transportation, energy, environment, industrial organization</div>",
     ]
     if digest.get("top_line"):
         parts.append(
             "<div style='background:#f7f3e8;border-left:4px solid #b08a2e;padding:12px 14px;margin:0 0 22px 0;font-size:15px;line-height:1.5;'>"
             f"{e(digest['top_line'])}</div>"
         )
+    current_group = None
     for s in digest["sections"]:
-        label = s.get("label") or s["topic"]
-        parts.append(f"<h2 style='font-size:17px;border-bottom:1px solid #ddd;padding-bottom:4px;margin:26px 0 10px 0;'>{e(label)}</h2>")
+        if s.get("group") != current_group:
+            current_group = s.get("group")
+            parts.append(f"<h2 style='font-size:18px;margin:28px 0 6px 0;color:#1a3c6e;'>{e(s.get('group_label', ''))}</h2>")
+        parts.append(f"<h3 style='font-size:15px;border-bottom:1px solid #ddd;padding-bottom:4px;margin:16px 0 10px 0;'>{e(s.get('label') or s['section'])}"
+                     + (f" <span style='font-weight:normal;color:#666;'>&middot; {e(s['title'])}</span>" if s.get("title") else "")
+                     + "</h3>")
+        if s.get("note"):
+            parts.append(f"<div style='color:#666;font-size:12px;margin:0 0 10px 0;'>{e(s['note'])}</div>")
         if not s.get("items"):
             parts.append("<p style='color:#777;font-size:14px;'>No items in the window.</p>")
             continue
         for i in s["items"]:
-            meta = " &middot; ".join(x for x in (e(i.get("source", "")), e(fmt_time(i.get("published"), tz))) if x)
+            meta = " &middot; ".join(e(b) for b in item_meta(i, tz))
+            link = i.get("url") or i.get("coverage_url")
             parts.append("<div style='margin:0 0 16px 0;'>")
-            parts.append(f"<a href='{e(i['url'], quote=True)}' style='font-size:15px;font-weight:bold;color:#1a3c6e;text-decoration:none;'>{e(i['headline'])}</a>")
+            parts.append(f"<a href='{e(link, quote=True)}' style='font-size:15px;font-weight:bold;color:#1a3c6e;text-decoration:none;'>{e(i['headline'])}</a>")
             if meta:
                 parts.append(f"<div style='color:#777;font-size:12px;margin:2px 0 4px 0;'>{meta}</div>")
             if i.get("summary"):
                 parts.append(f"<div style='font-size:14px;line-height:1.5;'>{e(i['summary'])}</div>")
             if i.get("why_it_matters"):
                 parts.append(f"<div style='font-size:13px;line-height:1.45;color:#444;font-style:italic;margin-top:3px;'>Why it matters: {e(i['why_it_matters'])}</div>")
+            if i.get("kind") == "landmark" and i.get("coverage_url"):
+                parts.append(f"<div style='font-size:12px;margin-top:3px;'><a href='{e(i['coverage_url'], quote=True)}' style='color:#1a3c6e;'>Search contemporary coverage</a></div>")
             parts.append("</div>")
-    # footer: feed health + provenance
     bad = [h for h in digest.get("feed_health", []) if h.get("status") != "ok"]
     stats = digest.get("stats", {})
     parts.append("<div style='margin-top:30px;padding-top:10px;border-top:1px solid #ddd;color:#888;font-size:12px;line-height:1.5;'>")
@@ -668,31 +1115,32 @@ def render_html(digest: dict, cfg: dict) -> str:
         parts.append(
             f"Sources: {stats.get('feeds_ok', 0)} of {stats.get('feeds', 0)} feeds returned items; "
             f"{stats.get('items_in_window', 0)} items in the last {digest.get('lookback_hours', '?')} hours, "
-            f"{stats.get('items_kept', 0)} after topic filtering and de-duplication.<br>"
+            f"{stats.get('items_kept', 0)} after topic and region filtering and de-duplication.<br>"
         )
     if bad:
         parts.append("Feeds with no items this run: " + ", ".join(
             f"{e(h['name'])} ({e(h['status'])}{': ' + e(h['error'][:60]) if h.get('error') else ''})" for h in bad
         ) + ".<br>")
     parts.append(f"Generated by /news-digest ({e(str(digest.get('generated_by', 'unknown')))}). "
-                 "Sources and keywords: <code>scripts/news_digest/feeds.toml</code>.")
+                 "Sources, regions, keywords: <code>scripts/news_digest/feeds.toml</code>; landmarks: <code>archive.toml</code>.")
     parts.append("</div></div></body></html>")
     return "\n".join(parts)
 
 
-def render_text(digest: dict, cfg: dict) -> str:
-    tz = ZoneInfo(cfg["settings"]["timezone"])
-    lines = [f"DAILY NEWS DIGEST — {digest_date_label(digest, tz)}", ""]
-    if digest.get("top_line"):
-        lines += [digest["top_line"], ""]
-    for s in digest["sections"]:
-        label = s.get("label") or s["topic"]
-        lines += [label.upper(), "-" * len(label)]
-        if not s.get("items"):
-            lines += ["(no items in the window)", ""]
-            continue
-        for i in s["items"]:
-            meta = " · ".join(x for x in (i.get("source", ""), fmt_time(i.get("published"), tz)) if x)
+def _text_items(s: dict, tz: ZoneInfo, md: bool) -> list[str]:
+    lines = []
+    for i in s["items"]:
+        meta = " · ".join(item_meta(i, tz))
+        link = i.get("url") or i.get("coverage_url")
+        if md:
+            lines.append(f"- **[{i['headline']}]({link})**" + (f" ({meta})" if meta else ""))
+            if i.get("summary"):
+                lines.append(f"  {i['summary']}")
+            if i.get("why_it_matters"):
+                lines.append(f"  _Why it matters: {i['why_it_matters']}_")
+            if i.get("kind") == "landmark" and i.get("coverage_url") and i.get("url"):
+                lines.append(f"  [Search contemporary coverage]({i['coverage_url']})")
+        else:
             lines.append(f"* {i['headline']}")
             if meta:
                 lines.append(f"  {meta}")
@@ -700,8 +1148,32 @@ def render_text(digest: dict, cfg: dict) -> str:
                 lines.append(f"  {i['summary']}")
             if i.get("why_it_matters"):
                 lines.append(f"  Why it matters: {i['why_it_matters']}")
-            lines.append(f"  {i['url']}")
+            lines.append(f"  {link}")
             lines.append("")
+    return lines
+
+
+def render_text(digest: dict, cfg: dict) -> str:
+    tz = ZoneInfo(cfg["settings"]["timezone"])
+    lines = [f"DAILY NEWS DIGEST — {digest_date_label(digest, tz)}", ""]
+    if digest.get("top_line"):
+        lines += [digest["top_line"], ""]
+    current_group = None
+    for s in digest["sections"]:
+        if s.get("group") != current_group:
+            current_group = s.get("group")
+            g = s.get("group_label", "")
+            lines += ["=" * len(g), g.upper(), "=" * len(g), ""]
+        label = s.get("label") or s["section"]
+        if s.get("title"):
+            label += f" · {s['title']}"
+        lines += [label, "-" * len(label)]
+        if s.get("note"):
+            lines += [s["note"], ""]
+        if not s.get("items"):
+            lines += ["(no items in the window)", ""]
+            continue
+        lines += _text_items(s, tz, md=False)
         lines.append("")
     bad = [h for h in digest.get("feed_health", []) if h.get("status") != "ok"]
     if bad:
@@ -716,18 +1188,21 @@ def render_markdown(digest: dict, cfg: dict) -> str:
     lines = [f"# Daily news digest — {digest_date_label(digest, tz)}", ""]
     if digest.get("top_line"):
         lines += [f"> {digest['top_line']}", ""]
+    current_group = None
     for s in digest["sections"]:
-        lines += [f"## {s.get('label') or s['topic']}", ""]
+        if s.get("group") != current_group:
+            current_group = s.get("group")
+            lines += [f"## {s.get('group_label', '')}", ""]
+        label = s.get("label") or s["section"]
+        if s.get("title"):
+            label += f" · {s['title']}"
+        lines += [f"### {label}", ""]
+        if s.get("note"):
+            lines += [f"_{s['note']}_", ""]
         if not s.get("items"):
             lines += ["_No items in the window._", ""]
             continue
-        for i in s["items"]:
-            meta = " · ".join(x for x in (i.get("source", ""), fmt_time(i.get("published"), tz)) if x)
-            lines.append(f"- **[{i['headline']}]({i['url']})** ({meta})" if meta else f"- **[{i['headline']}]({i['url']})**")
-            if i.get("summary"):
-                lines.append(f"  {i['summary']}")
-            if i.get("why_it_matters"):
-                lines.append(f"  _Why it matters: {i['why_it_matters']}_")
+        lines += _text_items(s, tz, md=True)
         lines.append("")
     return "\n".join(lines)
 
@@ -802,6 +1277,7 @@ def write_outputs(out: Path, html_body: str, text: str, digest: dict, cfg: dict)
 
 def deliver(digest: dict, cfg: dict, out: str | None, dry_run: bool) -> int:
     validate_digest(digest)
+    normalize_sections(digest, cfg)
     tz = ZoneInfo(cfg["settings"]["timezone"])
     html_body = render_html(digest, cfg)
     text = render_text(digest, cfg)
@@ -823,11 +1299,22 @@ def deliver(digest: dict, cfg: dict, out: str | None, dry_run: bool) -> int:
     return 0
 
 
+def log_stats(collected: Collected) -> None:
+    s = collected.stats
+    log(f"feeds ok {s['feeds_ok']}/{s['feeds']}; items in window {s['items_in_window']}; "
+        f"kept {s['items_kept']}; offered {s['items_offered']}; archive: {collected.archive.get('title', 'off')}")
+
+
 # --------------------------------------------------------------------------- CLI
+
+def _collect_from_args(cfg: dict, args) -> Collected:
+    return collect(cfg, hours=args.hours, only_sections=args.sections, archive=not args.no_archive,
+                   archive_day=args.archive_day, archive_week=args.archive_week)
+
 
 def cmd_collect(args) -> int:
     cfg = load_config(args.config)
-    collected = collect(cfg, hours=args.hours, only_topics=args.topics)
+    collected = _collect_from_args(cfg, args)
     payload = asdict(collected)
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
@@ -835,10 +1322,8 @@ def cmd_collect(args) -> int:
         log(f"wrote {args.out}")
     else:
         print(json.dumps(payload, ensure_ascii=False, indent=1))
-    s = collected.stats
-    log(f"feeds ok {s['feeds_ok']}/{s['feeds']}; items in window {s['items_in_window']}; "
-        f"kept {s['items_kept']}; offered {s['items_offered']}")
-    return 3 if s["feeds_ok"] == 0 else 0
+    log_stats(collected)
+    return 3 if collected.stats["feeds_ok"] == 0 else 0
 
 
 def cmd_send(args) -> int:
@@ -849,9 +1334,14 @@ def cmd_send(args) -> int:
     except (OSError, ValueError) as exc:
         log(f"bad digest JSON: {exc}")
         return 2
-    labels = {k: t["label"] for k, t in cfg["topics"].items()}
-    for s in digest["sections"]:
-        s.setdefault("label", labels.get(s["topic"], s["topic"]))
+    normalize_sections(digest, cfg)
+    if not args.no_archive and cfg["archive"]["enabled"]:
+        tz = ZoneInfo(cfg["settings"]["timezone"])
+        landmarks = load_landmarks(cfg)
+        plan = archive_plan(cfg, datetime.now(tz).date(), landmarks,
+                            day_override=args.archive_day, week_override=args.archive_week)
+        plan["landmark_items"] = [landmark_to_item(l, cfg) for l in plan.pop("landmarks", [])]
+        merge_archive(digest, plan, cfg)
     digest.setdefault("generated_by", "claude-in-session")
     digest.setdefault("date", datetime.now(ZoneInfo(cfg["settings"]["timezone"])).strftime("%Y-%m-%d"))
     return deliver(digest, cfg, args.out, args.dry_run)
@@ -863,11 +1353,9 @@ def cmd_run(args) -> int:
         local = datetime.now(ZoneInfo(cfg["settings"]["timezone"])).strftime("%H:%M %Z")
         log(f"skipping: local time is {local}, not the {args.only_at_hour}:00 hour")
         return 0
-    collected = collect(cfg, hours=args.hours, only_topics=args.topics)
-    s = collected.stats
-    log(f"feeds ok {s['feeds_ok']}/{s['feeds']}; items in window {s['items_in_window']}; "
-        f"kept {s['items_kept']}; offered {s['items_offered']}")
-    if s["feeds_ok"] == 0:
+    collected = _collect_from_args(cfg, args)
+    log_stats(collected)
+    if collected.stats["feeds_ok"] == 0:
         log("every feed failed; nothing to send (network blocked, or all sources dead)")
         for h in collected.feed_health[:10]:
             log(f"  {h['name']}: {h['status']} {h['error']}")
@@ -882,15 +1370,33 @@ def cmd_run(args) -> int:
 
 def cmd_check_feeds(args) -> int:
     cfg = load_config(args.config)
-    collected = collect(cfg, hours=args.hours)
+    collected = collect(cfg, hours=args.hours, archive=False)
     width = max(len(h["name"]) for h in collected.feed_health) + 2
-    print(f"{'feed':<{width}} {'status':<12} {'http':>5} {'total':>6} {'window':>7} {'kept':>5}  error")
+    print(f"{'feed':<{width}} {'region':<7} {'status':<12} {'http':>5} {'total':>6} {'window':>7} {'kept':>5}  error")
     for h in collected.feed_health:
-        print(f"{h['name']:<{width}} {h['status']:<12} {str(h['http_status'] or ''):>5} "
+        print(f"{h['name']:<{width}} {h['region']:<7} {h['status']:<12} {str(h['http_status'] or ''):>5} "
               f"{h['items_total']:>6} {h['items_in_window']:>7} {h['items_kept']:>5}  {h['error'][:70]}")
     s = collected.stats
     print(f"\n{s['feeds_ok']}/{s['feeds']} feeds ok; {s['items_in_window']} items in window; {s['items_kept']} kept")
     return 3 if s["feeds_ok"] == 0 else 0
+
+
+def cmd_archive_plan(args) -> int:
+    cfg = load_config(args.config)
+    tz = ZoneInfo(cfg["settings"]["timezone"])
+    landmarks = load_landmarks(cfg)
+    today = date.fromisoformat(args.date) if args.date else datetime.now(tz).date()
+    for offset in range(args.days):
+        plan = archive_plan(cfg, today + timedelta(days=offset), landmarks,
+                            day_override=args.archive_day, week_override=args.archive_week)
+        marks = plan.get("landmarks", [])
+        print(f"{(today + timedelta(days=offset)).isoformat()}  {plan.get('phase'):<12} {plan.get('title', '')}"
+              + (f"  [{len(marks)} landmark(s)]" if marks else ""))
+        if args.verbose:
+            for l in marks:
+                print(f"    {landmark_date_label(l):<20} {l['title']}")
+    print(f"\n{len(landmarks)} landmarks loaded ({sum(1 for l in landmarks if l['tier'] == 1)} tier 1)")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -900,25 +1406,30 @@ def build_parser() -> argparse.ArgumentParser:
     def common(sp):
         sp.add_argument("--config", default=str(DEFAULT_CONFIG), help="feeds.toml path")
 
+    def archive_opts(sp):
+        sp.add_argument("--no-archive", action="store_true", help="omit the archive section")
+        sp.add_argument("--archive-day", type=int, metavar="N", help="pretend today is day N of the archive schedule")
+        sp.add_argument("--archive-week", metavar="YYYY-MM-DD", help="force the archive to a specific historical week")
+
+    def collect_opts(sp):
+        sp.add_argument("--hours", type=float, help="lookback window (default from config)")
+        sp.add_argument("--sections", type=lambda s: [t.strip() for t in s.split(",") if t.strip()],
+                        help="comma-separated section keys or groups (dc, us, world, archive, us_energy, …)")
+
     sp = sub.add_parser("collect", help="fetch feeds and write candidate items JSON")
-    common(sp)
-    sp.add_argument("--hours", type=float, help="lookback window (default from config)")
-    sp.add_argument("--topics", type=lambda s: [t.strip() for t in s.split(",") if t.strip()],
-                    help="comma-separated topic keys to include")
+    common(sp); collect_opts(sp); archive_opts(sp)
     sp.add_argument("--out", help="write JSON here instead of stdout")
     sp.set_defaults(func=cmd_collect)
 
     sp = sub.add_parser("send", help="render a digest JSON and email it (or write with --out)")
-    common(sp)
+    common(sp); archive_opts(sp)
     sp.add_argument("--digest", required=True, help="digest JSON produced by Claude or by `run --save-json`")
     sp.add_argument("--out", help="also write .html/.txt/.md files here (path to the .html)")
     sp.add_argument("--dry-run", action="store_true", help="render only; never send")
     sp.set_defaults(func=cmd_send)
 
     sp = sub.add_parser("run", help="collect + summarize + send")
-    common(sp)
-    sp.add_argument("--hours", type=float)
-    sp.add_argument("--topics", type=lambda s: [t.strip() for t in s.split(",") if t.strip()])
+    common(sp); collect_opts(sp); archive_opts(sp)
     sp.add_argument("--no-ai", action="store_true", help="skip the Claude API even if a key is set")
     sp.add_argument("--out", help="write .html/.txt/.md files here (path to the .html)")
     sp.add_argument("--save-json", help="write the digest JSON here")
@@ -931,6 +1442,13 @@ def build_parser() -> argparse.ArgumentParser:
     common(sp)
     sp.add_argument("--hours", type=float)
     sp.set_defaults(func=cmd_check_feeds)
+
+    sp = sub.add_parser("archive-plan", help="show the archive chunk for today or a range of days")
+    common(sp); archive_opts(sp)
+    sp.add_argument("--date", help="start date (YYYY-MM-DD), default today")
+    sp.add_argument("--days", type=int, default=1, help="how many consecutive days to show")
+    sp.add_argument("--verbose", action="store_true", help="list the landmarks in each chunk")
+    sp.set_defaults(func=cmd_archive_plan)
     return p
 
 

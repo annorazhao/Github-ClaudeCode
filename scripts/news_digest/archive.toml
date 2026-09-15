@@ -1,0 +1,586 @@
+# Curated landmarks in the Washington region's traffic and transportation policy history,
+# with an emphasis on Northern Virginia. Used by the archive section of /news-digest:
+# tier-1 entries fill the first `landmark_days` digests; every entry also appears in the
+# week-by-week archive when its week comes up, and again in "this week in earlier years".
+#
+# Fields
+#   date        YYYY-MM-DD, YYYY-MM (month known), or YYYY (year known)
+#   tier        1 = the most consequential (shown first), 2 = major, 3 = notable
+#   title, summary, why_it_matters (optional)
+#   jurisdiction, level   federal | state | regional | county | city | town
+#   confidence  high | medium ("medium" prints "details to verify" next to the item)
+#   query       search string used to build a dated "search contemporary coverage" link
+#   url         optional; add a confirmed article link and it replaces the search link
+#
+# These entries were written from general knowledge, not fetched from the web, so each one
+# links to a dated web search rather than to an article. Confirm dates and figures before
+# citing any of them in research. Add, correct, or remove entries freely.
+
+[[landmark]]
+date = "2002-11-05"
+tier = 3
+title = "Northern Virginia voters reject a half-cent sales tax for transportation"
+jurisdiction = "Northern Virginia"
+level = "regional"
+confidence = "high"
+summary = "A referendum that would have raised the Northern Virginia sales tax to fund roads and transit failed at the polls, alongside a similar measure in Hampton Roads. The defeat shaped the next decade of funding fights and pushed the region toward tolling, public-private partnerships, and later legislative packages rather than a voter-approved regional tax."
+query = "Northern Virginia sales tax referendum transportation defeated November 2002"
+
+[[landmark]]
+date = "2007-12"
+tier = 1
+title = "Virginia signs the Capital Beltway HOT lanes partnership with Fluor and Transurban"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "medium"
+summary = "The state closed a public-private partnership under the Public-Private Transportation Act to build and operate high-occupancy toll lanes on the Beltway in Fairfax County, with the concessionaire financing construction in exchange for decades of toll revenue. It became the template for the region's later express-lane deals on I-95, I-395, and I-66."
+why_it_matters = "Every later pricing and concession debate in the region traces back to this contract structure."
+query = "Capital Beltway HOT lanes Fluor Transurban agreement signed Virginia"
+
+[[landmark]]
+date = "2008-02-29"
+tier = 1
+title = "Virginia Supreme Court strikes down the Northern Virginia Transportation Authority's taxing power"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "high"
+summary = "In Marshall v. Northern Virginia Transportation Authority the court held that the General Assembly could not delegate taxing authority to an unelected regional body, voiding the regional taxes in the 2007 transportation package (HB 3202). The decision left Northern Virginia without a dedicated regional funding stream until the 2013 overhaul."
+query = "Marshall v. Northern Virginia Transportation Authority Supreme Court 2008 regional taxes"
+
+[[landmark]]
+date = "2008-11"
+tier = 2
+title = "The Airports Authority takes over the Dulles Toll Road to finance the Silver Line"
+jurisdiction = "Airports Authority"
+level = "regional"
+confidence = "high"
+summary = "Under an agreement with the Commonwealth, the Metropolitan Washington Airports Authority assumed operation of the Dulles Toll Road so that toll revenue could back the Dulles Corridor Metrorail Project. Toll increases to service that debt became a recurring political issue in Fairfax and Loudoun."
+query = "MWAA takes over Dulles Toll Road Silver Line financing 2008"
+
+[[landmark]]
+date = "2009-03"
+tier = 2
+title = "Federal funding agreement and groundbreaking for Silver Line Phase 1"
+jurisdiction = "Fairfax County"
+level = "regional"
+confidence = "medium"
+summary = "The Federal Transit Administration signed a Full Funding Grant Agreement for the first phase of the Dulles Corridor Metrorail Project, from Tysons to Wiehle Avenue in Reston, and construction began the same month. The line drove the redevelopment plan for Tysons adopted the following year."
+query = "Silver Line Phase 1 full funding grant agreement groundbreaking 2009"
+
+[[landmark]]
+date = "2010-06-22"
+tier = 2
+title = "Fairfax County adopts the Tysons Corner comprehensive plan"
+jurisdiction = "Fairfax County"
+level = "county"
+confidence = "medium"
+summary = "The Board of Supervisors approved a plan to remake Tysons from an office park into a transit-oriented downtown around four Silver Line stations, with a street grid, density tied to transit proximity, and a transportation funding plan financed partly by special tax districts."
+why_it_matters = "It is the region's largest test of whether rail plus zoning can convert a car-oriented edge city."
+query = "Fairfax County Board adopts Tysons comprehensive plan June 2010"
+
+[[landmark]]
+date = "2012-07-03"
+tier = 2
+title = "Loudoun County votes to join Metro and fund Silver Line Phase 2"
+jurisdiction = "Loudoun County"
+level = "county"
+confidence = "high"
+summary = "After months of debate, the Board of Supervisors voted 5 to 4 to opt into the second phase of the Silver Line, committing the county to its share of construction and to WMATA membership. The vote kept the extension to Dulles Airport and Ashburn alive."
+query = "Loudoun County Board of Supervisors votes to join Metro Silver Line July 2012"
+
+[[landmark]]
+date = "2012-11-17"
+tier = 1
+title = "The 495 Express Lanes open on the Capital Beltway"
+jurisdiction = "Fairfax County"
+level = "state"
+confidence = "high"
+summary = "Fourteen miles of dynamically priced high-occupancy toll lanes opened between the Springfield interchange and the Dulles Toll Road, the first piece of the region's express-lane network. Pricing that changes with congestion, free passage for three-person carpools with an E-ZPass Flex, and private operation by Transurban all debuted here."
+why_it_matters = "The lanes are the region's longest-running natural experiment in congestion pricing under a private toll concession."
+query = "495 Express Lanes open Capital Beltway November 17 2012"
+
+[[landmark]]
+date = "2013-04"
+tier = 1
+title = "Virginia enacts HB 2313, the largest transportation funding overhaul in a generation"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "high"
+summary = "Governor McDonnell signed a package that replaced the per-gallon gas tax with a percentage wholesale tax, raised the sales tax, and created dedicated regional taxes for Northern Virginia and Hampton Roads. Northern Virginia's regional revenue is split 70 percent to the NVTA for regional projects and 30 percent returned to localities."
+why_it_matters = "The 70/30 structure still governs how the region ranks and funds congestion projects."
+query = "HB 2313 Virginia transportation funding signed McDonnell 2013"
+
+[[landmark]]
+date = "2014-04"
+tier = 2
+title = "Virginia adopts the Smart Scale project-scoring law (HB 2)"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "medium"
+summary = "The General Assembly required the Commonwealth Transportation Board to score and rank capacity projects on congestion, safety, accessibility, environment, economic development, and land use before funding them. The first Smart Scale round ran in 2016, and the process now shapes most state-funded projects in Northern Virginia."
+query = "Virginia HB 2 Smart Scale project prioritization law 2014"
+
+[[landmark]]
+date = "2014-07-26"
+tier = 1
+title = "Silver Line Phase 1 opens from Tysons to Wiehle-Reston East"
+jurisdiction = "Fairfax County"
+level = "regional"
+confidence = "high"
+summary = "Five new stations opened, four of them in Tysons, bringing Metrorail to the Dulles Corridor for the first time. The opening triggered the office and residential redevelopment envisioned in the 2010 Tysons plan."
+query = "Silver Line opens July 26 2014 Tysons Wiehle-Reston East"
+
+[[landmark]]
+date = "2014-11-18"
+tier = 2
+title = "Arlington County cancels the Columbia Pike streetcar"
+jurisdiction = "Arlington County"
+level = "county"
+confidence = "high"
+summary = "After a decade of planning and a special election won by an opponent of the project, the County Board voted to cancel the streetcar planned for Columbia Pike and Crystal City. Arlington later pursued bus improvements on the Pike instead."
+query = "Arlington County Board cancels Columbia Pike streetcar November 2014"
+
+[[landmark]]
+date = "2014-12"
+tier = 1
+title = "The 95 Express Lanes open in Fairfax, Prince William, and Stafford counties"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "high"
+summary = "Twenty-nine miles of reversible high-occupancy toll lanes opened on I-95 between the Beltway and Garrisonville Road, converting the old HOV lanes and extending them south. Together with the Beltway lanes they created a continuous priced network for Northern Virginia's southern commuter corridor."
+query = "95 Express Lanes open December 2014 Virginia"
+
+[[landmark]]
+date = "2015-01-12"
+tier = 1
+title = "Smoke fills a Yellow Line train at L'Enfant Plaza; one passenger dies"
+jurisdiction = "WMATA"
+level = "regional"
+confidence = "high"
+summary = "An electrical arcing event filled a stopped train with smoke, killing Carol Glover and injuring dozens. The NTSB investigation exposed deep safety and maintenance failures, and by October 2015 the Federal Transit Administration took over direct safety oversight of Metrorail."
+why_it_matters = "It set off the safety-driven service disruptions of 2016 and 2017 that reshaped regional commuting."
+query = "L'Enfant Plaza smoke incident January 12 2015 Metro"
+
+[[landmark]]
+date = "2015-12"
+tier = 2
+title = "The District publishes its Vision Zero action plan"
+jurisdiction = "District of Columbia"
+level = "city"
+confidence = "medium"
+summary = "Mayor Bowser's administration released a plan to eliminate traffic deaths and serious injuries by 2024, relying on lower speed limits, automated enforcement, and street redesigns. Later years brought expanded camera enforcement and a 20 mph default speed limit, while fatalities did not fall as hoped."
+query = "DC Vision Zero action plan released December 2015"
+
+[[landmark]]
+date = "2016-03-16"
+tier = 2
+title = "Metro shuts the entire rail system for a day of emergency cable inspections"
+jurisdiction = "WMATA"
+level = "regional"
+confidence = "high"
+summary = "General Manager Paul Wiedefeld closed Metrorail for a full weekday after a tunnel fire near McPherson Square resembled the 2015 L'Enfant Plaza event. The unprecedented shutdown previewed the SafeTrack program that began that June."
+query = "Metro full system shutdown March 16 2016 cable inspections"
+
+[[landmark]]
+date = "2016-04"
+tier = 1
+title = "Maryland signs the Purple Line public-private partnership"
+jurisdiction = "Maryland"
+level = "state"
+confidence = "high"
+summary = "The state closed a 36-year concession with Purple Line Transit Partners to build and operate a 16-mile light rail line from Bethesda to New Carrollton. A federal lawsuit over Metro ridership assumptions delayed construction until 2017, and the contractor later quit, pushing the opening from 2022 toward 2027 and roughly doubling the cost."
+query = "Purple Line public-private partnership signed April 2016 Maryland"
+
+[[landmark]]
+date = "2016-06-04"
+tier = 1
+title = "SafeTrack begins a year of Metrorail maintenance surges"
+jurisdiction = "WMATA"
+level = "regional"
+confidence = "high"
+summary = "Metro launched a series of single-tracking and multi-week line segment closures to catch up on deferred track work, running through June 2017. Ridership fell sharply and did not recover before the pandemic, and the jurisdictions began negotiating dedicated capital funding."
+query = "SafeTrack begins June 2016 Metro maintenance surges"
+
+[[landmark]]
+date = "2016-12"
+tier = 1
+title = "Virginia signs the I-66 Outside the Beltway express lanes partnership"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "medium"
+summary = "The Commonwealth reached a roughly 3.7 billion dollar agreement with Express Mobility Partners (Cintra and Meridiam) to build 22 miles of express lanes from the Beltway to Gainesville, plus park-and-ride lots and transit commitments, without state construction funding. The lanes opened in late 2022."
+query = "I-66 Outside the Beltway agreement Express Mobility Partners signed Virginia 2016"
+
+[[landmark]]
+date = "2017-08-28"
+tier = 2
+title = "Purple Line construction breaks ground after the federal lawsuit is resolved"
+jurisdiction = "Maryland"
+level = "state"
+confidence = "medium"
+summary = "Following an appeals court ruling that let the project proceed, state and federal officials broke ground in Prince George's County. The ceremony ended more than a year of uncertainty created by the 2016 court decision vacating federal approval."
+query = "Purple Line groundbreaking August 2017"
+
+[[landmark]]
+date = "2017-09-21"
+tier = 1
+title = "Governor Hogan announces a 9 billion dollar plan for toll lanes on I-270 and the Beltway"
+jurisdiction = "Maryland"
+level = "state"
+confidence = "high"
+summary = "The Traffic Relief Plan proposed adding four privately financed express toll lanes to I-495, I-270, and the Baltimore-Washington Parkway. It launched six years of environmental review, a contested 2019 Board of Public Works vote, a 2021 developer selection, and the collapse of the partnership in 2023."
+query = "Hogan Traffic Relief Plan I-270 I-495 toll lanes announced September 2017"
+
+[[landmark]]
+date = "2017-12-04"
+tier = 1
+title = "Dynamic tolling begins on I-66 inside the Beltway"
+jurisdiction = "Arlington County"
+level = "state"
+confidence = "high"
+summary = "Solo drivers were allowed on I-66 inside the Beltway during peak periods for the first time, paying a price that rose with demand, while carpools rode free. Opening-week tolls above 40 dollars drew national attention and General Assembly hearings, and toll revenue funds transit and multimodal projects through the NVTC."
+why_it_matters = "The corridor is one of the cleanest US examples of dynamic pricing imposed on an existing free road."
+query = "I-66 inside the Beltway tolls begin December 4 2017"
+
+[[landmark]]
+date = "2018-04"
+tier = 1
+title = "Virginia, Maryland, and the District enact dedicated capital funding for Metro"
+jurisdiction = "WMATA"
+level = "state"
+confidence = "high"
+summary = "The three jurisdictions committed a combined 500 million dollars a year in dedicated capital funding, the first such stream in WMATA's history, paired with governance changes and a cap on subsidy growth. Virginia's share redirected roughly 100 million dollars a year of NVTA regional revenue, a decision Northern Virginia officials fought and later partly reversed."
+query = "Metro dedicated funding 500 million Virginia Maryland DC enacted 2018"
+
+[[landmark]]
+date = "2018-11-13"
+tier = 1
+title = "Amazon picks Crystal City and Pentagon City for HQ2"
+jurisdiction = "Arlington County"
+level = "state"
+confidence = "high"
+summary = "Virginia's incentive package paired direct grants with transportation commitments in what became National Landing, including a second entrance for the Crystal City Metro station, a pedestrian bridge to Reagan National, and Route 1 and VRE improvements. Arlington added its own commitments and infrastructure timetable."
+query = "Amazon HQ2 Arlington announcement November 13 2018 transportation commitments"
+
+[[landmark]]
+date = "2019-06-05"
+tier = 2
+title = "Maryland's Board of Public Works approves the first phase of the I-495 and I-270 toll lanes program"
+jurisdiction = "Maryland"
+level = "state"
+confidence = "high"
+summary = "After a contentious hearing, the three-member board voted to advance the public-private partnership, starting with the American Legion Bridge and I-270, in exchange for concessions on transit and on the order of construction."
+query = "Board of Public Works approves I-495 I-270 toll lanes June 2019"
+
+[[landmark]]
+date = "2019-11-12"
+tier = 2
+title = "Virginia and Maryland sign the Capital Beltway Accord to replace the American Legion Bridge"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "high"
+summary = "Governors Northam and Hogan agreed to a jointly planned project to rebuild the bridge with express toll lanes and link Virginia's 495 Express Lanes to Maryland's proposed network. The bridge later became the focus of a publicly funded approach after Maryland's partnership collapsed."
+query = "Capital Beltway Accord Hogan Northam American Legion Bridge November 2019"
+
+[[landmark]]
+date = "2019-11-17"
+tier = 2
+title = "The 395 Express Lanes open, extending the priced network to the Potomac"
+jurisdiction = "Arlington County"
+level = "state"
+confidence = "medium"
+summary = "Eight miles of reversible HOV lanes on I-395 were converted to high-occupancy toll operation, connecting the 95 Express Lanes to the 14th Street Bridge. The concession includes an annual payment for transit in the corridor."
+query = "395 Express Lanes open November 2019"
+
+[[landmark]]
+date = "2019-12-19"
+tier = 1
+title = "Virginia announces the 3.7 billion dollar Transforming Rail in Virginia deal with CSX"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "high"
+summary = "The Commonwealth agreed to buy hundreds of miles of CSX right-of-way and to build a new Long Bridge over the Potomac, doubling rail capacity into Washington for VRE and Amtrak. The Virginia Passenger Rail Authority was created in 2020 to carry it out, and Long Bridge construction began in 2024."
+query = "Transforming Rail in Virginia CSX agreement Long Bridge announced December 2019"
+
+[[landmark]]
+date = "2020-03"
+tier = 1
+title = "The pandemic empties the region's roads and trains"
+jurisdiction = "Washington region"
+level = "federal"
+confidence = "high"
+summary = "Stay-at-home orders in March 2020 cut Metrorail ridership by roughly ninety percent and erased peak-hour congestion within days. Federal telework became the region's defining transportation fact for the next five years, and toll, transit, and parking revenue models built on daily commuting broke."
+why_it_matters = "Everything after 2020 in this archive is a story about how much of the old commute returned."
+query = "coronavirus Washington region traffic Metro ridership collapse March 2020"
+
+[[landmark]]
+date = "2020-04"
+tier = 1
+title = "Virginia's 2020 omnibus transportation act raises the gas tax and creates the passenger rail authority"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "high"
+summary = "Governor Northam signed HB 1414, which raised and indexed the fuel tax, created the Virginia Passenger Rail Authority, allowed speed cameras in school and work zones, and reorganized transit funding. It was the state's largest transportation package since HB 2313 in 2013."
+query = "Virginia HB 1414 omnibus transportation bill signed 2020 gas tax"
+
+[[landmark]]
+date = "2020-09"
+tier = 2
+title = "The Purple Line's construction contractor walks off the job"
+jurisdiction = "Maryland"
+level = "state"
+confidence = "high"
+summary = "The Fluor-led design-build team quit over cost disputes with the state, halting work with the line partly built. Maryland took over the site and negotiated a new contractor and a much larger budget over the following year."
+query = "Purple Line contractor Fluor quits September 2020"
+
+[[landmark]]
+date = "2020-10-14"
+tier = 3
+title = "Montgomery County opens Flash, the region's first bus rapid transit line, on US 29"
+jurisdiction = "Montgomery County"
+level = "county"
+confidence = "medium"
+summary = "The 14-mile Flash line between Burtonsville and Silver Spring opened with dedicated lanes on parts of Colesville Road, level boarding, and off-board fare collection. It became the reference case for BRT proposals on Richmond Highway, Route 7, and Veirs Mill Road."
+query = "Montgomery County Flash BRT US 29 opens October 2020"
+
+[[landmark]]
+date = "2021-02"
+tier = 2
+title = "Maryland selects Transurban and Macquarie to develop the I-495 and I-270 toll lanes"
+jurisdiction = "Maryland"
+level = "state"
+confidence = "high"
+summary = "Accelerate Maryland Partners was chosen as the phase-one developer for the American Legion Bridge and I-270 express lanes. The partnership never reached financial close, and Transurban withdrew in March 2023."
+query = "Accelerate Maryland Partners selected I-270 I-495 toll lanes February 2021"
+
+[[landmark]]
+date = "2021-09-05"
+tier = 2
+title = "Alexandria's DASH becomes the region's first fare-free bus system"
+jurisdiction = "Alexandria"
+level = "city"
+confidence = "medium"
+summary = "The city eliminated fares on DASH buses alongside a network redesign, using state transit ridership incentive funds and local money. Ridership rose well above pre-pandemic levels, and the experiment informed later fare-free debates in the District and Montgomery County."
+why_it_matters = "It is the region's cleanest fare-elasticity case at the city level."
+query = "DASH fare-free Alexandria September 2021"
+
+[[landmark]]
+date = "2021-10-12"
+tier = 1
+title = "A 7000-series train derails near Arlington Cemetery, sidelining most of Metro's fleet"
+jurisdiction = "WMATA"
+level = "regional"
+confidence = "high"
+summary = "The derailment exposed a wheel-gauge defect across the 7000-series cars, which made up about sixty percent of the fleet. The Washington Metrorail Safety Commission ordered them out of service, and reduced service persisted for much of the following year as return-to-office plans were taking shape."
+query = "Metro 7000 series derailment Arlington Cemetery October 2021"
+
+[[landmark]]
+date = "2021-11-15"
+tier = 1
+title = "The Bipartisan Infrastructure Law is signed"
+jurisdiction = "Federal"
+level = "federal"
+confidence = "high"
+summary = "The Infrastructure Investment and Jobs Act authorized roughly 1.2 trillion dollars over five years, raising formula funding for Virginia, Maryland, and the District and creating discretionary programs that later funded the Long Bridge, American Legion Bridge planning, and transit projects across the region."
+query = "Infrastructure Investment and Jobs Act signed November 15 2021"
+
+[[landmark]]
+date = "2021-12"
+tier = 2
+title = "Maryland approves a new Purple Line contract with an opening pushed to 2026 or 2027"
+jurisdiction = "Maryland"
+level = "state"
+confidence = "medium"
+summary = "The state reached agreement with Maryland Transit Solutions to finish construction, with total project costs rising toward 9 billion dollars including financing. The Board of Public Works approved the revised partnership in early 2022."
+query = "Purple Line new contractor Maryland Transit Solutions approved"
+
+[[landmark]]
+date = "2022-11-15"
+tier = 1
+title = "Silver Line Phase 2 opens to Dulles Airport and Loudoun County"
+jurisdiction = "Loudoun County"
+level = "regional"
+confidence = "high"
+summary = "Six stations opened from Reston Town Center to Ashburn, including Washington Dulles International Airport, more than four years behind the original schedule. Loudoun became a Metro jurisdiction, and the airport gained a rail link two decades after planning began."
+query = "Silver Line Phase 2 opens November 15 2022 Dulles Ashburn"
+
+[[landmark]]
+date = "2022-12"
+tier = 1
+title = "The 66 Express Lanes outside the Beltway fully open"
+jurisdiction = "Fairfax County"
+level = "state"
+confidence = "medium"
+summary = "The 22-mile express lanes between the Beltway and Gainesville opened in stages through late 2022, completing the privately financed corridor agreed in 2016. The project also delivered new park-and-ride lots, bus service, and bike and pedestrian connections funded through the concession."
+query = "66 Express Lanes outside the Beltway fully open 2022"
+
+[[landmark]]
+date = "2022-12-20"
+tier = 2
+title = "The D.C. Council votes to make Metrobus free within the District"
+jurisdiction = "District of Columbia"
+level = "city"
+confidence = "medium"
+summary = "The Metro for D.C. Act promised fare-free bus rides and expanded overnight service starting in mid-2023. The program was postponed when the city's 2024 budget could not fund it, and the debate over fare-free transit continued in later budgets."
+query = "DC Council passes Metro for DC Act free bus December 2022"
+
+[[landmark]]
+date = "2023-03"
+tier = 1
+title = "Transurban withdraws and Maryland's toll-lane partnership collapses"
+jurisdiction = "Maryland"
+level = "state"
+confidence = "high"
+summary = "The developer pulled out of the I-495 and I-270 program citing delays and changed conditions, ending the public-private approach begun under Governor Hogan. The Moore administration shifted to pursuing federal grants for the American Legion Bridge with Virginia while keeping managed lanes under study."
+query = "Transurban withdraws Maryland I-495 I-270 toll lanes March 2023"
+
+[[landmark]]
+date = "2023-03-22"
+tier = 3
+title = "Arlington County approves Missing Middle housing zoning"
+jurisdiction = "Arlington County"
+level = "county"
+confidence = "high"
+summary = "The County Board allowed small multifamily buildings in districts previously reserved for single-family homes, with reduced parking requirements near transit. The change, later challenged in court and revisited, is the region's main test case for the land-use side of transit-oriented policy."
+query = "Arlington Missing Middle zoning approved March 2023"
+
+[[landmark]]
+date = "2023-05-19"
+tier = 2
+title = "The Potomac Yard Metro station opens in Alexandria"
+jurisdiction = "Alexandria"
+level = "city"
+confidence = "high"
+summary = "The infill station on the Blue and Yellow lines, financed largely by the city through special tax districts and developer contributions, opened after years of delay. It anchored redevelopment plans that later included the failed 2023 to 2024 arena proposal."
+query = "Potomac Yard Metro station opens May 2023"
+
+[[landmark]]
+date = "2023-09"
+tier = 3
+title = "The District expands automated traffic enforcement across hundreds of new camera sites"
+jurisdiction = "District of Columbia"
+level = "city"
+confidence = "medium"
+summary = "DDOT began installing a large batch of new speed, red-light, bus-lane, and stop-sign cameras as part of Vision Zero and a budget that counted on the resulting fine revenue. The program drew objections from Maryland and Virginia commuters and prompted reciprocity and collection debates."
+query = "DC new traffic cameras expansion 2023 automated enforcement"
+
+[[landmark]]
+date = "2023-11"
+tier = 2
+title = "Metro warns of a 750 million dollar fiscal cliff"
+jurisdiction = "WMATA"
+level = "regional"
+confidence = "high"
+summary = "With federal pandemic relief exhausted and ridership below 2019 levels, WMATA published a budget scenario with deep service cuts, station closures, and layoffs for fiscal 2025. The warning forced Virginia, Maryland, and the District into a spring 2024 funding deal."
+query = "Metro fiscal cliff 750 million service cuts warning November 2023"
+
+[[landmark]]
+date = "2024-03-26"
+tier = 2
+title = "The Francis Scott Key Bridge collapses in Baltimore"
+jurisdiction = "Baltimore"
+level = "state"
+confidence = "high"
+summary = "A container ship struck the bridge, killing six workers and closing the Port of Baltimore's main channel for weeks. The loss rerouted freight and commuter traffic in the Baltimore region and triggered a federally funded replacement."
+query = "Francis Scott Key Bridge collapse March 26 2024"
+
+[[landmark]]
+date = "2024-03-27"
+tier = 2
+title = "The Alexandria arena deal for the Wizards and Capitals collapses"
+jurisdiction = "Alexandria"
+level = "state"
+confidence = "high"
+summary = "A December 2023 plan to move Monumental Sports' teams to Potomac Yard, backed by Governor Youngkin and dependent on a state financing authority, died in the General Assembly amid objections over transportation impacts and public financing. The teams stayed in the District under a renovated Capital One Arena deal."
+query = "Alexandria Potomac Yard arena deal collapses March 2024"
+
+[[landmark]]
+date = "2024-04"
+tier = 1
+title = "Metro's fiscal 2025 budget averts the cliff with higher fares and new jurisdiction money"
+jurisdiction = "WMATA"
+level = "regional"
+confidence = "high"
+summary = "The WMATA board approved a budget that raised fares about 12.5 percent and relied on additional operating subsidies from Virginia, Maryland, and the District, avoiding the drastic cuts floated in late 2023. The deal was explicitly a one-year bridge, leaving the structural gap to later budgets."
+query = "WMATA fiscal 2025 budget approved fare increase April 2024"
+
+[[landmark]]
+date = "2024"
+tier = 3
+title = "Richmond Highway widening and bus rapid transit move into construction in Fairfax County"
+jurisdiction = "Fairfax County"
+level = "county"
+confidence = "medium"
+summary = "VDOT's widening of Route 1 between Jeff Todd Way and Sherwood Hall Lane, which reserves the median for the county's planned nine-station BRT line, advanced from design into construction. Confirm milestones before citing."
+query = "Richmond Highway BRT Fairfax County construction Route 1 widening"
+
+[[landmark]]
+date = "2024-12-31"
+tier = 3
+title = "The DC Circulator makes its final runs"
+jurisdiction = "District of Columbia"
+level = "city"
+confidence = "high"
+summary = "The District shut down the Circulator bus system after nearly twenty years, citing cost per rider, and shifted riders to Metrobus routes. The closure fed into WMATA's bus network redesign that launched in 2025."
+query = "DC Circulator ends service December 2024"
+
+[[landmark]]
+date = "2025-01-20"
+tier = 1
+title = "Federal employees are ordered back to the office"
+jurisdiction = "Federal"
+level = "federal"
+confidence = "high"
+summary = "A presidential memorandum on the first day of the new administration directed agencies to end remote work arrangements, and most agencies required full-time in-person work by spring 2025. Metrorail ridership and peak-period congestion in the region rose noticeably in the following months, even as federal workforce reductions cut the other way."
+why_it_matters = "It is the sharpest identifiable shock to regional commuting demand since March 2020."
+query = "federal return to office memorandum January 2025 Washington commute Metro ridership"
+
+[[landmark]]
+date = "2025-01-29"
+tier = 2
+title = "A midair collision near Reagan National kills 67"
+jurisdiction = "Airports Authority"
+level = "federal"
+confidence = "high"
+summary = "An American Eagle regional jet and an Army helicopter collided on approach to DCA over the Potomac. The FAA permanently restricted helicopter traffic on the river route near the airport, and the crash reopened debate over flight caps at National."
+query = "Reagan National midair collision January 29 2025"
+
+[[landmark]]
+date = "2025"
+tier = 3
+title = "495 NEXT extends the Beltway express lanes toward the American Legion Bridge"
+jurisdiction = "Fairfax County"
+level = "state"
+confidence = "medium"
+summary = "Transurban's extension of the 495 Express Lanes north from the Dulles Toll Road to the George Washington Parkway was scheduled to open in 2025, positioning Virginia's priced network at the Maryland line. Confirm the opening date and initial traffic effects before citing."
+query = "495 NEXT express lanes extension opens"
+
+[[landmark]]
+date = "2025-06-29"
+tier = 1
+title = "Metro launches its redesigned Better Bus network"
+jurisdiction = "WMATA"
+level = "regional"
+confidence = "high"
+summary = "WMATA replaced its decades-old Metrobus route map with a redesigned network, renaming every route and shifting service toward frequent all-day corridors. It was the first system-wide bus redesign in the agency's history and affected riders across the District, Maryland, and Northern Virginia."
+query = "Metro Better Bus network launch June 29 2025"
+
+[[landmark]]
+date = "2025-10-01"
+tier = 2
+title = "A record federal government shutdown begins"
+jurisdiction = "Federal"
+level = "federal"
+confidence = "medium"
+summary = "The lapse in appropriations ran for more than forty days into November 2025, furloughing large parts of the region's federal workforce and depressing commuting, transit ridership, and toll traffic in the interim. Confirm the exact dates and regional ridership effects before citing."
+query = "federal government shutdown October 2025 Washington region commuters Metro ridership"
+
+[[landmark]]
+date = "2025-11-04"
+tier = 2
+title = "Virginia elects Abigail Spanberger governor ahead of a transportation-heavy 2026 session"
+jurisdiction = "Virginia"
+level = "state"
+confidence = "medium"
+summary = "The 2025 election produced a change of administration in Richmond before the 2026 General Assembly session, in which Metro's dedicated funding, toll relief, and the next round of Smart Scale projects were on the agenda. Confirm the transportation platform and the session's outcomes before citing."
+query = "Virginia governor election November 2025 transportation Northern Virginia Metro funding"
