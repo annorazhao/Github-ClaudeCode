@@ -1,0 +1,5 @@
+# Runtime dependencies for scripts/news_digest/news_digest.py
+feedparser>=6.0
+requests>=2.31
+# Optional: AI ranking + summaries when ANTHROPIC_API_KEY is set (safe to omit otherwise)
+anthropic>=1.0

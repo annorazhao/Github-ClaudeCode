@@ -1,0 +1,277 @@
+# Sources and settings for /news-digest (scripts/news_digest/news_digest.py).
+#
+# Each [[feed]] entry has:
+#   name   display name used in the email
+#   url    RSS / Atom URL (a local file path is also accepted, for tests)
+#   topic  transportation | energy | environment | industrial_organization | auto
+#          "auto" means: classify every item by the keyword lists under [topics]
+#          and drop items that match none of them. Use it for general-news feeds.
+#   weight optional ranking multiplier, default 1.0 (0.5 = de-emphasize, 1.5 = boost)
+#
+# Feeds are fetched independently; one dead feed never fails the run. The email footer
+# lists feeds that returned nothing, and `news_digest.py check-feeds` prints a full
+# health report. Prune or replace entries that stay dead.
+
+[settings]
+lookback_hours = 26            # window for "the past day" (26 gives slack for late feeds)
+max_items_per_topic = 8        # items shown per section in the email
+max_candidates_per_topic = 30  # items offered to the summarizer per section
+timezone = "America/New_York"  # used for dates in the email and --only-at-hour
+require_date = true            # skip entries with no publication date (avoids daily repeats)
+
+# ---------------------------------------------------------------------------
+# Topics. Order here is the order of sections in the email.
+# Keywords are matched case-insensitively on whole words/phrases in title + summary.
+# ---------------------------------------------------------------------------
+
+[topics.transportation]
+label = "Transportation"
+keywords = [
+  "transportation", "transport", "transit", "highway", "freight", "rail", "railroad",
+  "railway", "trucking", "trucks", "airline", "airlines", "aviation", "airport", "port",
+  "ports", "shipping", "maritime", "autonomous vehicle", "self-driving", "robotaxi",
+  "electric vehicle", "electric vehicles", "EV", "EVs", "congestion pricing", "toll",
+  "infrastructure", "FAA", "DOT", "NHTSA", "FHWA", "Amtrak", "bus", "buses", "ride-hail",
+  "ridehailing", "Uber", "Lyft", "Waymo", "traffic", "logistics", "supply chain",
+  "fuel economy", "CAFE standards", "automaker", "automakers", "vehicle", "vehicles",
+  "commute", "bike lane", "high-speed rail", "Boeing", "Airbus", "tariffs on cars",
+]
+
+[topics.energy]
+label = "Energy"
+keywords = [
+  "energy", "electricity", "power grid", "grid", "utility", "utilities", "natural gas",
+  "LNG", "oil", "crude", "OPEC", "gasoline", "diesel", "refinery", "pipeline", "solar",
+  "wind", "offshore wind", "nuclear", "reactor", "battery", "batteries", "storage",
+  "hydrogen", "coal", "renewable", "renewables", "FERC", "EIA", "PJM", "ERCOT", "ISO",
+  "capacity market", "transmission", "interconnection", "data center", "data centers",
+  "electricity prices", "power prices", "rate case", "net metering", "IRA tax credit",
+  "clean energy", "fossil fuel", "fracking", "shale", "Exxon", "Chevron", "Shell",
+]
+
+[topics.environment]
+label = "Environment"
+keywords = [
+  "environment", "environmental", "climate", "emissions", "carbon", "CO2", "methane",
+  "greenhouse", "pollution", "air quality", "water quality", "PFAS", "EPA", "Clean Air Act",
+  "Clean Water Act", "NEPA", "endangered species", "wildfire", "wildfires", "drought",
+  "flood", "flooding", "hurricane", "heat wave", "sea level", "conservation", "biodiversity",
+  "deforestation", "recycling", "plastic", "toxic", "superfund", "carbon tax", "cap-and-trade",
+  "carbon market", "carbon capture", "net zero", "Paris Agreement", "COP", "IPCC",
+  "climate policy", "environmental justice", "resilience", "adaptation",
+]
+
+[topics.industrial_organization]
+label = "Industrial Organization & Antitrust"
+keywords = [
+  "antitrust", "anti-trust", "merger", "mergers", "acquisition", "acquires", "acquire",
+  "takeover", "buyout", "monopoly", "monopolization", "monopsony", "FTC", "Federal Trade Commission",
+  "DOJ", "Justice Department", "competition", "competition policy", "market power",
+  "price fixing", "price-fixing", "collusion", "cartel", "bid rigging", "regulation",
+  "regulator", "regulators", "deregulation", "platform", "platforms", "Big Tech", "Amazon",
+  "Google", "Alphabet", "Meta", "Apple", "Microsoft", "Nvidia", "vertical integration",
+  "consolidation", "oligopoly", "market concentration", "concentration", "entry", "exit",
+  "pricing", "algorithmic pricing", "surge pricing", "CMA", "European Commission",
+  "Digital Markets Act", "DMA", "noncompete", "non-compete", "labor market power",
+  "hospital merger", "airline merger", "deal", "divestiture", "consent decree", "Section 2",
+  "Sherman Act", "Clayton Act", "HSR", "Hart-Scott-Rodino", "class action", "price discrimination",
+]
+
+# ---------------------------------------------------------------------------
+# Transportation
+# ---------------------------------------------------------------------------
+
+[[feed]]
+name = "Transport Topics"
+url = "https://www.ttnews.com/rss.xml"
+topic = "transportation"
+
+[[feed]]
+name = "FreightWaves"
+url = "https://www.freightwaves.com/news/feed"
+topic = "transportation"
+
+[[feed]]
+name = "Streetsblog USA"
+url = "https://usa.streetsblog.org/feed"
+topic = "transportation"
+weight = 0.9
+
+[[feed]]
+name = "Railway Age"
+url = "https://www.railwayage.com/feed/"
+topic = "transportation"
+weight = 0.8
+
+[[feed]]
+name = "Smart Cities Dive"
+url = "https://www.smartcitiesdive.com/feeds/news/"
+topic = "auto"
+
+[[feed]]
+name = "Supply Chain Dive"
+url = "https://www.supplychaindive.com/feeds/news/"
+topic = "auto"
+weight = 0.8
+
+[[feed]]
+name = "Eno Center for Transportation"
+url = "https://www.enotrans.org/feed/"
+topic = "transportation"
+weight = 1.2
+
+# ---------------------------------------------------------------------------
+# Energy
+# ---------------------------------------------------------------------------
+
+[[feed]]
+name = "EIA Today in Energy"
+url = "https://www.eia.gov/rss/todayinenergy.xml"
+topic = "energy"
+weight = 1.3
+
+[[feed]]
+name = "Utility Dive"
+url = "https://www.utilitydive.com/feeds/news/"
+topic = "energy"
+
+[[feed]]
+name = "Canary Media"
+url = "https://www.canarymedia.com/rss"
+topic = "energy"
+
+[[feed]]
+name = "Energy Institute at Haas (blog)"
+url = "https://energyathaas.wordpress.com/feed/"
+topic = "energy"
+weight = 1.4
+
+[[feed]]
+name = "Heatmap News"
+url = "https://heatmap.news/feeds/feed.rss"
+topic = "auto"
+
+[[feed]]
+name = "OilPrice.com"
+url = "https://oilprice.com/rss/main"
+topic = "energy"
+weight = 0.7
+
+[[feed]]
+name = "CleanTechnica"
+url = "https://cleantechnica.com/feed/"
+topic = "auto"
+weight = 0.6
+
+# ---------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------
+
+[[feed]]
+name = "EPA News Releases"
+url = "https://www.epa.gov/newsreleases/search/rss"
+topic = "environment"
+weight = 1.2
+
+[[feed]]
+name = "Inside Climate News"
+url = "https://insideclimatenews.org/feed/"
+topic = "environment"
+
+[[feed]]
+name = "Grist"
+url = "https://grist.org/feed/"
+topic = "environment"
+weight = 0.9
+
+[[feed]]
+name = "Carbon Brief"
+url = "https://www.carbonbrief.org/feed/"
+topic = "environment"
+
+[[feed]]
+name = "NYT Climate"
+url = "https://rss.nytimes.com/services/xml/rss/nyt/Climate.xml"
+topic = "environment"
+
+[[feed]]
+name = "NYT Energy & Environment"
+url = "https://rss.nytimes.com/services/xml/rss/nyt/EnergyEnvironment.xml"
+topic = "auto"
+
+[[feed]]
+name = "The Guardian Environment"
+url = "https://www.theguardian.com/environment/rss"
+topic = "environment"
+weight = 0.8
+
+[[feed]]
+name = "E&E News"
+url = "https://www.eenews.net/feed/"
+topic = "auto"
+
+[[feed]]
+name = "Yale Environment 360"
+url = "https://e360.yale.edu/feed.xml"
+topic = "environment"
+weight = 0.9
+
+# ---------------------------------------------------------------------------
+# Industrial organization / antitrust / regulation
+# ---------------------------------------------------------------------------
+
+[[feed]]
+name = "FTC Competition Press Releases"
+url = "https://www.ftc.gov/feeds/press-release-competition.xml"
+topic = "industrial_organization"
+weight = 1.3
+
+[[feed]]
+name = "FTC Press Releases (all)"
+url = "https://www.ftc.gov/feeds/press-release.xml"
+topic = "auto"
+
+[[feed]]
+name = "DOJ Press Releases"
+url = "https://www.justice.gov/feeds/opa/justice-news.xml"
+topic = "auto"
+
+[[feed]]
+name = "ProMarket (Stigler Center)"
+url = "https://www.promarket.org/feed/"
+topic = "industrial_organization"
+weight = 1.3
+
+[[feed]]
+name = "BIG by Matt Stoller"
+url = "https://www.thebignewsletter.com/feed"
+topic = "industrial_organization"
+weight = 0.9
+
+[[feed]]
+name = "Truth on the Market"
+url = "https://truthonthemarket.com/feed/"
+topic = "industrial_organization"
+weight = 0.9
+
+[[feed]]
+name = "UK Competition and Markets Authority"
+url = "https://www.gov.uk/government/organisations/competition-and-markets-authority.atom"
+topic = "industrial_organization"
+weight = 0.7
+
+# ---------------------------------------------------------------------------
+# General business / research feeds, classified by keyword
+# ---------------------------------------------------------------------------
+
+[[feed]]
+name = "NYT Business"
+url = "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"
+topic = "auto"
+weight = 0.9
+
+[[feed]]
+name = "NBER New Working Papers"
+url = "https://www.nber.org/rss/new.xml"
+topic = "auto"
+weight = 1.2

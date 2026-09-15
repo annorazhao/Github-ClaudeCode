@@ -73,6 +73,9 @@ quality_reports/preregistrations/*
 !quality_reports/checkpoints/.gitkeep
 !quality_reports/preregistrations/.gitkeep
 
+# /news-digest output (daily HTML / text / Markdown / JSON renders)
+quality_reports/news_digests/
+
 # R analysis outputs (generated artifacts; keep scripts, ignore outputs)
 scripts/R/_outputs/
 

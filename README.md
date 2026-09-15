@@ -171,14 +171,14 @@ The guide covers Claude Code's latest capabilities:
 
 ### One repo, many project types
 
-This workflow is designed as a **single hub for an entire research program** — not one paper at a time. The same `CLAUDE.md`, rules, agents, and quality gates serve courses and lectures, papers and referee reports, data analysis and replication packages, **Monte Carlo simulation studies** (`/simulation-study` + `sim-reviewer`), and the **R package release gate** (`/r-package-check` + `r-package-reviewer`) — all new in v1.10.0. *On the roadmap:* Stata / Python package checks (SSC / PyPI) and personal-productivity workflows. See [`.claude/references/v2.0-backlog.md`](.claude/references/v2.0-backlog.md) for what's next.
+This workflow is designed as a **single hub for an entire research program** — not one paper at a time. The same `CLAUDE.md`, rules, agents, and quality gates serve courses and lectures, papers and referee reports, data analysis and replication packages, **Monte Carlo simulation studies** (`/simulation-study` + `sim-reviewer`), and the **R package release gate** (`/r-package-check` + `r-package-reviewer`) — all new in v1.10.0. A first personal-productivity workflow ships alongside them: a **daily news digest** emailed at 10:00 ET (`/news-digest` + `scripts/news_digest/`). *On the roadmap:* Stata / Python package checks (SSC / PyPI) and further personal-productivity workflows. See [`.claude/references/v2.0-backlog.md`](.claude/references/v2.0-backlog.md) for what's next.
 
 ---
 
 ## What's Included
 
 <details>
-<summary><strong>18 agents, 38 skills, 28 rules, 6 hooks</strong> (click to expand)</summary>
+<summary><strong>18 agents, 39 skills, 28 rules, 6 hooks</strong> (click to expand)</summary>
 
 ### Agents (`.claude/agents/`)
 
@@ -245,6 +245,7 @@ This workflow is designed as a **single hub for an entire research program** —
 | `/stata-replication` (v1.9.0) | End-to-end Stata pipeline via the `stata-mcp` MCP server (mirrors `/data-analysis` for R-first projects) |
 | `/simulation-study` (v1.10.0) | Scaffold + run a reproducible Monte Carlo study — parameterized DGP, estimator grid, seeded replications, bias/RMSE/coverage/size/power with Monte Carlo SEs |
 | `/r-package-check` (v1.10.0) | R package release gate — `devtools::document()` + tests + `R CMD check --as-cran`, triage ERROR/WARNING/NOTE vs CRAN policy, `r-package-reviewer` pass |
+| `/news-digest` | Daily news digest email — RSS collection on transportation, energy, environment, and industrial organization; Claude selects and summarizes; SMTP delivery; scheduled at 10:00 ET by a GitHub Actions cron or a Claude Code Routine |
 
 ### Research Workflow
 
@@ -327,7 +328,7 @@ Rules use path-scoped loading: **always-on** rules load every session (~100 line
 |------|-------------|---------|
 | [Claude Code](https://code.claude.com/docs/en/overview) | Everything | [claude.ai/install](https://claude.ai/install) |
 | git | Clone + version control | [git-scm.com](https://git-scm.com/downloads) |
-| Python 3 (3.9+) | Internal checkers (palette sync, TikZ prevention) | Preinstalled on macOS/Linux; [python.org](https://www.python.org/) for Windows |
+| Python 3 (3.9+; 3.11+ for the news digest) | Internal checkers (palette sync, TikZ prevention) and the `/news-digest` pipeline | Preinstalled on macOS/Linux; [python.org](https://www.python.org/) for Windows |
 | XeLaTeX | LaTeX compilation (Beamer `HelloWorld`, real lectures) | [TeX Live](https://tug.org/texlive/) or [MacTeX](https://tug.org/mactex/) |
 | [Quarto](https://quarto.org) | Web slides (Quarto `HelloWorld`, real lectures) | [quarto.org/docs/get-started](https://quarto.org/docs/get-started/) |
 | R | Figures and analysis (`/data-analysis`, `scripts/R/` template) | [r-project.org](https://www.r-project.org/) |
