@@ -6,6 +6,17 @@ If you have forked this template, see the **Upgrading** section at the bottom fo
 
 ---
 
+## Unreleased
+
+A personal-productivity addition on top of v1.10.0: the template gains a scheduled news digest, its first workflow that runs without a person at the keyboard. No changes to existing skills, agents, rules, or hooks.
+
+### Added
+
+- **`/news-digest` skill** (`.claude/skills/news-digest/`) — builds a daily email that opens with the Washington region's traffic and transportation policy (Northern Virginia at state, county, and city or town level, then the District, Maryland, and region-wide bodies), continues with United States news on transportation, energy, environment, and industrial organization / antitrust, adds a few major world stories, and closes with an archive section on the region's transportation history: curated landmarks for the first days, then one historical week per day found through dated Google News searches. Collects from RSS feeds and Google News queries, has Claude select and summarize per section with strict grounding in the source text, and delivers over SMTP, an email connector, or (failing both) the session's final message. Falls back to WebSearch when the sandbox's egress policy blocks feed hosts. `disable-model-invocation: true`, since it sends mail.
+- **`scripts/news_digest/`** — the pipeline behind the skill: `news_digest.py` (`collect` / `send` / `run` / `check-feeds` / `archive-plan`), `feeds.toml` (sources, topics, region and jurisdiction keyword tables, per-section limits, archive schedule), `archive.toml` (curated landmarks from 2002 to 2025 with dated coverage-search links rather than unverified article URLs), an offline `unittest` suite with generated fixtures, and a setup README. Optional Claude API ranking + summaries via structured outputs when `ANTHROPIC_API_KEY` is set; keyword ranking otherwise. One dead feed never fails a run; the email footer names feeds that returned nothing.
+- **`.github/workflows/news-digest.yml`** — daily cron at 10:00 America/New_York (two UTC crons plus a local-hour guard so exactly one fires across daylight-saving changes), `workflow_dispatch` with a dry-run option, rendered digest kept as an artifact. Needs SMTP secrets; runs from the default branch once merged.
+- **Docs** — README skills table + hub framing, guide (Pattern 11 note + All Skills row), landing page, CLAUDE.md quick reference and commands, `v2.0-backlog.md` (personal-productivity hub now has a shipped item), a `[LEARN:network]` entry in MEMORY.md on sandbox egress limits, and `quality_reports/news_digests/` added to `.gitignore`.
+
 ## v1.10.0 — 2026-05-31
 
 A **hub-expansion + currency-refresh** minor release. The template gains a Monte Carlo simulation capability and an R package-development release gate, refreshes the model / effort / cost guidance for **Opus 4.8**, and reframes itself as a hub for an entire research program — not just slides and papers. Shipped against the plan at `quality_reports/plans/2026-05-31_v1.10.0-simulation-and-hub.md` (local-only per the `quality_reports/plans/*` ignore rule). No breaking changes.

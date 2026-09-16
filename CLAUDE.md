@@ -64,6 +64,9 @@ python scripts/quality_score.py Quarto/file.qmd
 
 # Surface-count sync (README ↔ CLAUDE.md ↔ guide ↔ landing page)
 ./scripts/check-surface-sync.sh
+
+# Daily news digest (render only; set the SMTP variables to send)
+python3 scripts/news_digest/news_digest.py run --dry-run --out /tmp/digest.html
 ```
 
 **Palette contract:** color names in `Preambles/header.tex` must match SCSS variables in `Quarto/theme-template.scss`. See [`Preambles/README.md`](Preambles/README.md).
@@ -124,6 +127,7 @@ Enforced by `/commit` (halts + asks for override); not enforced by a git pre-com
 | `/stata-replication [paper-or-data]` | End-to-end Stata pipeline scaffold + execution via `stata-mcp` (mirrors `/data-analysis` for R) |
 | `/simulation-study [estimator+DGP]` | Reproducible Monte Carlo study: DGP, estimator grid, seeded reps, bias/RMSE/coverage/size/power + Monte Carlo SEs |
 | `/r-package-check [pkg path]` | R package release gate: `devtools::document()` + tests + `R CMD check --as-cran`, CRAN-policy triage, `r-package-reviewer` pass |
+| `/news-digest [--send]` | Daily news digest email at 10:00 ET: Washington-region traffic and transportation policy first (Northern Virginia by state, county, city), then US transportation, energy, environment, industrial organization, a few world items, and an archive section walking through the region's transportation history (GitHub Actions cron or a Claude Code Routine) |
 
 ---
 

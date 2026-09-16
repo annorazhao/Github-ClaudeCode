@@ -1,0 +1,94 @@
+# Daily news digest — transportation, energy, environment, industrial organization.
+#
+# Fires at 10:00 America/New_York every day. GitHub cron is UTC-only, so two crons are
+# scheduled (14:00 and 15:00 UTC) and the script's --only-at-hour guard lets exactly one
+# of them proceed depending on daylight saving time. Scheduled workflows only run from
+# the repository's default branch, and GitHub may delay them by several minutes.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   SMTP_HOST       e.g. smtp.gmail.com
+#   SMTP_PORT       e.g. 587 (STARTTLS) or 465 (SSL)  [optional, default 587]
+#   SMTP_USERNAME   the sending mailbox
+#   SMTP_PASSWORD   an app password, never the account password
+#   DIGEST_TO       recipient address(es), comma-separated
+#   DIGEST_FROM     [optional] defaults to SMTP_USERNAME
+#   ANTHROPIC_API_KEY  [optional] enables ranked, written summaries via the Claude API
+#
+# Manual runs: Actions -> "Daily news digest" -> Run workflow (tick dry_run to render only).
+
+name: Daily news digest
+
+on:
+  schedule:
+    - cron: "0 14 * * *"   # 10:00 EDT (roughly March to November)
+    - cron: "0 15 * * *"   # 10:00 EST (roughly November to March)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render the digest as an artifact without sending email"
+        type: boolean
+        default: false
+      hours:
+        description: "Lookback window in hours"
+        type: string
+        default: "26"
+      no_ai:
+        description: "Skip the Claude API even if ANTHROPIC_API_KEY is set"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: news-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/news_digest/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install --quiet -r scripts/news_digest/requirements.txt
+
+      - name: Build and send the digest
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          DIGEST_TO: ${{ secrets.DIGEST_TO }}
+          DIGEST_FROM: ${{ secrets.DIGEST_FROM }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_HOURS: ${{ inputs.hours }}
+          INPUT_NO_AI: ${{ inputs.no_ai }}
+        run: |
+          set -euo pipefail
+          args=(run --out digest/digest.html --save-json digest/digest.json)
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            args+=(--only-at-hour 10)          # one of the two UTC crons matches 10:00 New York
+          fi
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then args+=(--dry-run); fi
+          if [ "${INPUT_NO_AI:-false}" = "true" ]; then args+=(--no-ai); fi
+          if [ -n "${INPUT_HOURS:-}" ]; then args+=(--hours "$INPUT_HOURS"); fi
+          python scripts/news_digest/news_digest.py "${args[@]}"
+
+      - name: Keep the rendered digest as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: news-digest-${{ github.run_id }}
+          path: digest/
+          if-no-files-found: ignore
+          retention-days: 14
