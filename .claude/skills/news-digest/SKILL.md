@@ -33,7 +33,7 @@ pipeline is `scripts/news_digest/news_digest.py` (see its README for setup).
 | Washington region: traffic and transportation policy | Northern Virginia `dc_nova` (tagged by jurisdiction: town, city, county, state, NVTA/NVTC/VRE), District of Columbia `dc_dc`, Maryland `dc_maryland`, Region-wide and Metro `dc_regional` | 10 / 5 / 5 / 5 |
 | United States | `us_transportation`, `us_energy`, `us_environment`, `us_industrial_organization` | 5 each |
 | World | `world` (a splash of major stories, for research context) | 4 |
-| From the archive | `archive`: landmarks for the first four days, then one historical week per day from January 2016 forward, then "this week in earlier years" | 8 |
+| From the archive | `archive`: one past year per email, starting with last year and moving back to 2016 (curated landmarks plus policy-ranked searched coverage, at least ten items when the sources allow), then a policy-roots chunk, then one quarter per email | 14 |
 
 Northern Virginia is the priority. Prefer policy actions, project milestones, funding
 and tolling decisions, enforcement changes, and data releases at the state, county, and
@@ -78,10 +78,13 @@ fallback:
    insidenova.com, fairfaxtimes.com, loudountimes.com, potomaclocal.com, virginiamercury.com,
    marylandmatters.org, wamu.org, wusa9.com, nbcwashington.com, bizjournals.com.
 2. Then one or two searches per US topic and one for the world section.
-3. If today's archive phase is `week` (see `archive.title`), search that week too:
-   "Northern Virginia transportation <Month YYYY>", "Fairfax County traffic <Month YYYY>",
-   "Metro WMATA <Month YYYY>", restricted to the local domains above; keep only results
-   whose visible date falls in that week (or, failing that, that month).
+3. If today's archive phase is `period` (see `archive.title` and `archive.label`, e.g.
+   "2025"), search that period for major policy developments: "Northern Virginia
+   transportation policy <YYYY>", "Fairfax County Board transportation <YYYY>", "VDOT
+   General Assembly toll <YYYY>", "WMATA Metro funding <YYYY>", "DDOT MDOT Purple Line
+   <YYYY>", restricted to the local domains above; keep results dated in that period and
+   aim for at least `archive.min_items` items, favoring decisions, funding, openings, and
+   enforcement changes over incidents.
 4. Build the same candidate structure by hand: `title`, `url`, `source` (site name),
    `published` (only if the result shows a date), `summary` (the snippet), and for region
    items a `jurisdiction` such as "Fairfax County" or "Virginia" with its `level`.
@@ -104,8 +107,10 @@ You are the summarizer. Work from the candidates only.
   names, or context that are not in the input. A thin blurb gets a one-line summary, not a
   guess. Copy `url`, `source`, `published`, `jurisdiction`, and `level` verbatim from the
   collected item.
-- For the archive week's items, write a short retrospective in the past tense and mention
-  the year. Landmarks are already written; leave them to the script (Step 4 merges them).
+- For the archive period's items, pick the most consequential policy developments (at least
+  `archive.min_items` when the candidates allow, ordered by importance), and write each as a
+  short retrospective in the past tense naming the month and year. Landmarks are already
+  written; leave them to the script (Step 4 merges them first and tops the section up).
 - Write a `top_line` of three to five sentences on the day's most consequential
   developments, leading with the region when it has substantive news; for each item a two
   or three sentence `summary` plus a one-sentence `why_it_matters` for a researcher in that
@@ -189,8 +194,9 @@ Two schedulers exist so the digest arrives even when one is unavailable. Both ta
 | Claude Code Routine | A fresh cloud session at `0 14 * * *` UTC (10:00 EDT; 09:00 EST after November until the cron is adjusted) | This skill (feeds, or WebSearch when fetches are blocked) | Claude in the session | SMTP if the environment carries the variables, else a connector, else the run-notification email | Manage under claude.ai → Routines |
 
 The archive schedule is stateless: day number since `[archive].anchor` in `feeds.toml`
-decides the chunk, so both schedulers show the same chunk on the same day. Preview it with
-`python3 scripts/news_digest/news_digest.py archive-plan --days 10 --verbose`.
+decides the chunk (day 0 is last year, then each earlier year to 2016, then policy roots,
+then one quarter per day), so both schedulers show the same chunk on the same day. Preview
+it with `python3 scripts/news_digest/news_digest.py archive-plan --days 12 --verbose`.
 
 GitHub may delay scheduled workflows by several minutes and disables schedules on public
 repositories with no commits for 60 days. The Routine consumes session usage on each run.
@@ -218,7 +224,7 @@ repositories with no commits for 60 days. The Routine consumes session usage on 
 **Actions:**
 1. `collect` exits 3 with `HTTP 403` on every feed.
 2. WebSearch fallback gathers candidates per section, local domains first, plus the
-   archive week when the phase is `week`.
+   archive period when the phase is `period`.
 3. SMTP variables are absent and no connector is attached, so the turn ends with the
    full Markdown digest and a one-line note that email is not configured.
 **Result:** The Routine's notification email carries the digest.
@@ -261,10 +267,10 @@ transport (those go to the US topic sections by design).
 **Solution:** Extend `[regions.*].keywords`, `[[jurisdiction]]` entries, or
 `traffic_keywords` in `feeds.toml`.
 
-**Symptom:** The archive shows the wrong chunk, or restarted from the landmarks
+**Symptom:** The archive shows the wrong chunk, or restarted from last year
 **Cause:** `[archive].anchor` was changed, or the run used `--archive-day`.
-**Solution:** Keep `anchor` fixed at the first day the archive ran; use `--archive-week
-YYYY-MM-DD` for a one-off replay.
+**Solution:** Keep `anchor` fixed at the first day the archive ran; use `--archive-period
+2019` (or `2019-Q4`) for a one-off replay.
 
 **Symptom:** The scheduled workflow never runs
 **Cause:** Schedules fire only from the default branch, and only after the workflow file
