@@ -115,13 +115,17 @@ world = 2
 [archive]
 enabled = true
 anchor = "2026-09-16"
-landmark_days = 2
-start_week = "2016-01-04"
-weeks_per_day = 1
-order = "forward"
-max_items = 8
+passes = ["year"]
+start_year = 2025
+end_year = 2016
+roots = true
+order = "backward"
+min_items = 2
+max_items = 4
 landmarks_file = "{landmarks}"
-query = "(Fairfax OR Arlington) (traffic OR toll)"
+queries = ["(Fairfax OR Arlington) (traffic OR toll)"]
+policy_keywords = ["approves", "toll", "funding"]
+incident_keywords = ["crash", "killed"]
 
 [[feed]]
 name = "Transit Wire"
@@ -360,7 +364,7 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(nd.cap_for(self.cfg, "dc_dc"), nd.DEFAULT_DC_LIMIT)
         self.assertEqual(nd.cap_for(self.cfg, "us_energy"), 3)
         self.assertEqual(nd.cap_for(self.cfg, "world"), 2)
-        self.assertEqual(nd.cap_for(self.cfg, "archive"), 8)
+        self.assertEqual(nd.cap_for(self.cfg, "archive"), 4)
 
 
 class CollectTests(unittest.TestCase):
@@ -424,10 +428,13 @@ class CollectTests(unittest.TestCase):
 
     def test_archive_plan_in_collected(self):
         self.assertEqual(self.collected.archive["phase"], "off")   # NOW is the day before the anchor
-        later = nd.collect(self.cfg, now=NOW + timedelta(days=1))
-        self.assertEqual(later.archive["phase"], "landmarks")
-        self.assertEqual([l["headline"] for l in later.archive["landmark_items"]], ["The 495 Express Lanes open"])
-        self.assertIn("cd_min:10/27/2012", later.archive["landmark_items"][0]["coverage_url"])
+        roots = nd.collect(self.cfg, now=NOW, archive_day=10)
+        self.assertEqual(roots.archive["phase"], "roots")
+        self.assertEqual([l["headline"] for l in roots.archive["landmark_items"]], ["The 495 Express Lanes open"])
+        self.assertIn("cd_min:10/27/2012", roots.archive["landmark_items"][0]["coverage_url"])
+        year = nd.collect(self.cfg, now=NOW, archive_day=1)
+        self.assertEqual((year.archive["phase"], year.archive["label"]), ("period", "2024"))
+        self.assertEqual([l["headline"] for l in year.archive["landmark_items"]], ["Anniversary item near mid-September"])
 
     def test_collect_round_trips_through_json(self):
         payload = json.loads(json.dumps(nd.asdict(self.collected)))
@@ -454,55 +461,95 @@ class ArchiveTests(unittest.TestCase):
     def test_schedule_phases(self):
         anchor = date(2026, 9, 16)
         p0 = nd.archive_plan(self.cfg, anchor, self.landmarks)
-        self.assertEqual((p0["phase"], p0["part"], p0["of"]), ("landmarks", 1, 2))
-        self.assertEqual([l["title"] for l in p0["landmarks"]], ["The 495 Express Lanes open"])
+        self.assertEqual((p0["phase"], p0["kind"], p0["label"], p0["index"], p0["of"]), ("period", "year", "2025", 1, 11))
+        self.assertTrue(p0["title"].startswith("2025 in review"))
+        self.assertEqual(p0["landmarks"], [])
         p1 = nd.archive_plan(self.cfg, anchor + timedelta(days=1), self.landmarks)
-        self.assertEqual([l["title"] for l in p1["landmarks"]], ["Tolling begins on I-66 inside the Beltway"])
-        p2 = nd.archive_plan(self.cfg, anchor + timedelta(days=2), self.landmarks)
-        self.assertEqual(p2["phase"], "week")
-        self.assertEqual(p2["week_start"], "2016-01-04")
-        self.assertEqual(p2["index"], 1)
-        self.assertEqual([l["title"] for l in p2["landmarks"]], ["A landmark inside the first archive week"])
-        p3 = nd.archive_plan(self.cfg, anchor + timedelta(days=3), self.landmarks)
-        self.assertEqual(p3["week_start"], "2016-01-11")
+        self.assertEqual(p1["label"], "2024")
+        self.assertEqual([l["title"] for l in p1["landmarks"]], ["Anniversary item near mid-September"])
+        p8 = nd.archive_plan(self.cfg, anchor + timedelta(days=8), self.landmarks)
+        self.assertEqual(p8["label"], "2017")
+        self.assertEqual([l["title"] for l in p8["landmarks"]], ["Tolling begins on I-66 inside the Beltway"])
+        p9 = nd.archive_plan(self.cfg, anchor + timedelta(days=9), self.landmarks)
+        self.assertEqual(p9["label"], "2016")
+        self.assertEqual([l["title"] for l in p9["landmarks"]], ["A landmark inside the first archive week"])
+        p10 = nd.archive_plan(self.cfg, anchor + timedelta(days=10), self.landmarks)
+        self.assertEqual(p10["phase"], "roots")
+        self.assertEqual([l["title"] for l in p10["landmarks"]], ["The 495 Express Lanes open"])
+        self.assertTrue(p10["title"].startswith("Policy roots before 2016 (11 of 11)"))
+        p11 = nd.archive_plan(self.cfg, anchor + timedelta(days=11), self.landmarks)
+        self.assertEqual(p11["phase"], "anniversary")
+        pa = nd.archive_plan(self.cfg, TODAY, self.landmarks, day_override=99)   # Sept 15: near the 2024-09-14 item
+        self.assertEqual([l["title"] for l in pa["landmarks"]], ["Anniversary item near mid-September"])
         self.assertEqual(nd.archive_plan(self.cfg, anchor - timedelta(days=1), self.landmarks)["phase"], "off")
 
-    def test_schedule_reaches_present_and_switches_to_anniversaries(self):
-        p = nd.archive_plan(self.cfg, TODAY, self.landmarks, day_override=99999)   # past every available week
-        self.assertEqual(p["phase"], "anniversary")
-        self.assertEqual([l["title"] for l in p["landmarks"]], ["Anniversary item near mid-September"])
-        p_mid_sept = nd.archive_plan(self.cfg, date(2040, 9, 15), self.landmarks, day_override=99999)
-        self.assertEqual([l["title"] for l in p_mid_sept["landmarks"]], ["Anniversary item near mid-September"])
+    def test_second_pass_by_quarters(self):
+        self.cfg["archive"]["passes"] = ["year", "quarter"]
+        chunks = nd.archive_chunks(self.cfg, date(2026, 9, 16))
+        self.assertEqual(chunks[10], ("roots",))
+        kind, s_, e_, label = chunks[11][1:]
+        self.assertEqual((kind, s_, e_, label), ("quarter", date(2026, 4, 1), date(2026, 7, 1), "2026 Q2"))
+        self.assertEqual(chunks[-1][4], "2016 Q1")
+        q = nd.archive_plan(self.cfg, date(2026, 9, 16), self.landmarks, day_override=11)
+        self.assertEqual(q["title"], "2026 Q2 (12 of 53)")
 
     def test_overrides(self):
-        p = nd.archive_plan(self.cfg, TODAY, self.landmarks, week_override="2017-12-06")   # a Wednesday
-        self.assertEqual(p["week_start"], "2017-12-04")
+        p = nd.archive_plan(self.cfg, TODAY, self.landmarks, period_override="2017-Q4")
+        self.assertEqual((p["period_start"], p["period_end"], p["label"]), ("2017-10-01", "2018-01-01", "2017 Q4"))
         self.assertEqual([l["title"] for l in p["landmarks"]], ["Tolling begins on I-66 inside the Beltway"])
+        p = nd.archive_plan(self.cfg, TODAY, self.landmarks, period_override="2016-01-06")
+        self.assertEqual((p["kind"], p["period_start"]), ("week", "2016-01-04"))
+        self.assertEqual(nd.archive_plan(self.cfg, TODAY, self.landmarks, period_override="2020-H2")["label"], "2020, second half")
+        self.assertEqual(nd.archive_plan(self.cfg, TODAY, self.landmarks, period_override="2020-09")["label"], "September 2020")
         p = nd.archive_plan(self.cfg, TODAY, self.landmarks, day_override=1)
-        self.assertEqual(p["part"], 2)
+        self.assertEqual(p["label"], "2024")
 
-    def test_backward_order(self):
-        self.cfg["archive"]["order"] = "backward"
-        p = nd.archive_plan(self.cfg, date(2026, 9, 18), self.landmarks)
-        self.assertEqual(p["week_start"], "2026-09-07")     # last full week before Sept 18, 2026
+    def test_forward_order(self):
+        self.cfg["archive"]["order"] = "forward"
+        p = nd.archive_plan(self.cfg, date(2026, 9, 16), self.landmarks)
+        self.assertEqual(p["label"], "2016")
+        self.assertEqual(nd.archive_plan(self.cfg, date(2026, 9, 18), self.landmarks)["label"], "2018")
 
-    def test_archive_collect_uses_dated_google_news_query(self):
-        plan = nd.archive_plan(self.cfg, date(2026, 9, 18), self.landmarks)
+    def test_archive_collect_uses_dated_google_news_query_and_policy_scoring(self):
+        plan = nd.archive_plan(self.cfg, date(2026, 9, 16), self.landmarks, day_override=8)   # 2017
         captured = {}
 
         def fake_parse(feed_cfg, cfg, now, window_start):
-            captured.update(url=feed_cfg["url"], now=now, window_start=window_start)
-            item = nd.Item(id="x", title="Old toll story", url="https://old", source="WTOP", topic="transportation",
-                           section="dc_nova", published="2016-01-05T12:00:00+00:00", summary="s", score=1.0)
-            return [item], nd.FeedHealth(name=feed_cfg["name"], url=feed_cfg["url"], topic="auto", status="ok")
+            captured.update(url=feed_cfg["url"], now=now, window_start=window_start, flat=feed_cfg.get("flat_recency"))
+            mk = lambda t, u, summ: nd.Item(id=u, title=t, url=u, source="WTOP", topic="transportation",
+                                            section="dc_nova", published="2017-06-05T12:00:00+00:00",
+                                            summary=summ, score=1.0)
+            return [mk("Board approves toll relief funding", "https://policy", "The board approves funding."),
+                    mk("Two killed in I-66 crash", "https://crash", "A crash killed two."),
+                    mk("Toll lanes open", "https://open", "Lanes opened.")], \
+                   nd.FeedHealth(name=feed_cfg["name"], url=feed_cfg["url"], topic="auto", status="ok")
 
         with mock.patch.object(nd, "parse_feed", side_effect=fake_parse):
             items, health = nd.archive_collect(self.cfg, plan, NOW)
-        self.assertIn("after%3A2016-01-04", captured["url"])
-        self.assertIn("before%3A2016-01-11", captured["url"])
-        self.assertEqual(captured["window_start"].date(), date(2016, 1, 4))
-        self.assertEqual(items[0].section, "archive")
-        self.assertEqual(health[0].items_kept, 1)
+        self.assertIn("after%3A2017-01-01", captured["url"])
+        self.assertIn("before%3A2018-01-01", captured["url"])
+        self.assertEqual(captured["window_start"].date(), date(2017, 1, 1))
+        self.assertTrue(captured["flat"])
+        titles = [i.title for i in sorted(items, key=lambda i: i.score, reverse=True)]
+        self.assertEqual(titles, ["Board approves toll relief funding", "Toll lanes open"])   # incident dropped
+        self.assertTrue(all(i.section == "archive" for i in items))
+        self.assertEqual(health[0].items_kept, 2)
+
+    def test_merge_archive_tops_up_and_caps(self):
+        plan = nd.archive_plan(self.cfg, date(2026, 9, 16), self.landmarks, day_override=1)   # 2024, one landmark
+        plan["landmark_items"] = [nd.landmark_to_item(l, self.cfg) for l in plan.pop("landmarks")]
+        digest = {"sections": [{"section": "archive", "items": []}]}
+        cands = [{"title": f"Story {k}", "url": f"https://s{k}", "source": "WTOP", "published": "", "summary": "x",
+                  "score": 10 - k} for k in range(6)]
+        nd.merge_archive(digest, plan, self.cfg, candidates=cands)
+        items = digest["sections"][0]["items"]
+        self.assertEqual(items[0]["kind"], "landmark")
+        self.assertEqual(len(items), 2)                     # min_items = 2: landmark + best candidate
+        self.assertEqual(items[1]["headline"], "Story 0")
+        digest = {"sections": [{"section": "archive", "items": [
+            {"headline": f"Picked {k}", "url": f"https://p{k}"} for k in range(6)]}]}
+        nd.merge_archive(digest, plan, self.cfg, candidates=cands)
+        self.assertEqual(len(digest["sections"][0]["items"]), 4)   # max_items = 4, landmark kept first
 
     def test_coverage_url_windows(self):
         u = nd.coverage_search_url("q", date(2020, 9, 15), "month")
@@ -516,7 +563,7 @@ class DigestTests(unittest.TestCase):
     def setUp(self):
         self.fx = Fixture()
         self.cfg = nd.load_config(self.fx.config_path)
-        self.collected = nd.collect(self.cfg, now=NOW, archive_day=0)   # landmarks part 1
+        self.collected = nd.collect(self.cfg, now=NOW, archive_day=10)   # roots chunk (2012 landmark)
 
     def tearDown(self):
         self.fx.cleanup()
@@ -528,7 +575,7 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(digest["date"], "2026-09-15")
         archive = next(s for s in digest["sections"] if s["section"] == "archive")
         self.assertEqual(archive["items"][0]["kind"], "landmark")
-        self.assertTrue(archive["title"].startswith("Landmarks, part 1 of 2"))
+        self.assertTrue(archive["title"].startswith("Policy roots before 2016"))
         html_out = nd.render_html(digest, self.cfg)
         text_out = nd.render_text(digest, self.cfg)
         md_out = nd.render_markdown(digest, self.cfg)
@@ -547,7 +594,7 @@ class DigestTests(unittest.TestCase):
         subject = nd.subject_line(digest, nd.ZoneInfo("America/New_York"))
         self.assertTrue(subject.startswith("News digest Tuesday, September 15, 2026: "))
         self.assertIn("DC-region", subject)
-        self.assertIn("archive: Landmarks, part 1 of 2", subject)
+        self.assertIn("archive: Policy roots before 2016", subject)
 
     def test_html_escapes_untrusted_feed_text(self):
         digest = nd.summarize_fallback(self.collected, self.cfg)
@@ -684,11 +731,11 @@ class CliTests(unittest.TestCase):
         try:
             d = Path(fx.dir.name)
             items = d / "items.json"
-            rc = nd.main(["collect", "--config", str(fx.config_path), "--out", str(items), "--archive-day", "0"])
+            rc = nd.main(["collect", "--config", str(fx.config_path), "--out", str(items), "--archive-day", "10"])
             self.assertEqual(rc, 0)
             payload = json.loads(items.read_text())
             self.assertGreater(payload["stats"]["items_kept"], 0)
-            self.assertEqual(payload["archive"]["phase"], "landmarks")
+            self.assertEqual(payload["archive"]["phase"], "roots")
             first = next(s for s in payload["sections"] if s["key"] == "dc_nova")["items"][0]
             # A digest a Claude session would write from the collected items (no archive section):
             digest = {"top_line": "Test.", "sections": [{"section": "dc_nova", "items": [
@@ -699,7 +746,7 @@ class CliTests(unittest.TestCase):
             dpath.write_text(json.dumps(digest))
             out = d / "digest.html"
             rc = nd.main(["send", "--config", str(fx.config_path), "--digest", str(dpath),
-                          "--out", str(out), "--dry-run", "--archive-day", "0"])
+                          "--out", str(out), "--dry-run", "--archive-day", "10"])
             self.assertEqual(rc, 0)
             html_out = out.read_text()
             self.assertIn(first["title"], html_out)
@@ -738,8 +785,8 @@ class CliTests(unittest.TestCase):
                 rc = nd.main(["archive-plan", "--config", str(fx.config_path), "--date", "2026-09-16", "--days", "3"])
             self.assertEqual(rc, 0)
             out = buf.getvalue()
-            self.assertIn("landmarks", out)
-            self.assertIn("Week of January 4, 2016", out)
+            self.assertIn("2025 in review", out)
+            self.assertIn("2023 in review", out)
         finally:
             fx.cleanup()
 
@@ -762,9 +809,13 @@ class RealConfigTests(unittest.TestCase):
         for l in landmarks:
             self.assertIn(l["confidence"], ("high", "medium"), l["title"])
             self.assertTrue(l["query"], l["title"])
-        plan = nd.archive_plan(cfg, date(2026, 9, 16), landmarks)
-        self.assertEqual(plan["phase"], "landmarks")
-        self.assertGreaterEqual(len(plan["landmarks"]), 4)
+        self.assertGreaterEqual(len(cfg["archive"]["queries"]), 3)
+        plan = nd.archive_plan(cfg, date(2026, 9, 15), landmarks)
+        self.assertEqual((plan["phase"], plan["label"]), ("period", "2025"))
+        self.assertGreaterEqual(len(plan["landmarks"]), 5)
+        chunks = nd.archive_chunks(cfg, date(2026, 9, 15))
+        self.assertEqual(chunks[0][4], "2025")
+        self.assertEqual(chunks[10], ("roots",))
 
 
 if __name__ == "__main__":

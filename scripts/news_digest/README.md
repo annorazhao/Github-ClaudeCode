@@ -5,7 +5,7 @@ an email that opens with the Washington region's traffic and transportation poli
 (Northern Virginia first, at state, county, and city or town level, then the District,
 Maryland, and region-wide bodies), continues with United States news on transportation,
 energy, environment, and industrial organization, adds a few major world stories, and
-closes with an archive section on the region's transportation history.
+closes with an archive section on the region's transportation history, one past year per email.
 
 ```
 scripts/news_digest/
@@ -47,19 +47,22 @@ day's archive landmarks.
 
 `[archive]` in `feeds.toml` schedules it statelessly from `anchor` (the first day it ran):
 
-- Days 1 to `landmark_days`: the tier-1 landmarks from `archive.toml`, in date order, split
-  evenly. Each links to a dated Google search for contemporary coverage; the entries were
-  written from general knowledge and are marked "details to verify" when confidence is
-  medium, so confirm before citing.
-- Afterwards: one historical week per day from `start_week` (January 2016) forward, fetched
-  as a Google News RSS query with `after:` / `before:` operators and summarized like live
-  news, merged with any landmark dated in that week. `weeks_per_day` and `order` adjust
-  the pace and direction.
-- When the schedule reaches the present: landmarks from this calendar week in earlier
-  years.
+- Day 0 is `start_year` (2025), day 1 the year before, and so on down to `end_year` (2016).
+  Each email carries that year's curated landmarks from `archive.toml` first (they link to
+  a dated Google search for contemporary coverage and print "details to verify" when
+  confidence is medium), then coverage found through the `queries` with `after:` /
+  `before:` dates, classified like live news and scored for policy relevance
+  (`policy_keywords` up, incident-only stories out). The section is topped up to
+  `min_items` (10) and capped at `max_items` (14); landmarks are never dropped.
+- After the years: one "policy roots" chunk of landmarks from before `end_year`.
+- Then the next pass in `passes` ("quarter"): one quarter per email from the most recent
+  complete quarter back to `end_year`, for depth. Kinds available: year, half, quarter,
+  month, week. `order = "forward"` reverses the direction.
+- When every chunk has run: landmarks from this calendar week in earlier years.
 
-Preview with `python3 scripts/news_digest/news_digest.py archive-plan --days 10 --verbose`.
-Replay a week with `--archive-week 2017-12-04` on `run` or `send`.
+Preview with `python3 scripts/news_digest/news_digest.py archive-plan --days 12 --verbose`.
+Replay a chunk with `--archive-period 2019` (or `2019-Q4`, `2019-H1`, `2019-11`,
+`2019-11-04` for that week) on `run` or `send`.
 
 ## One-time setup for email
 
@@ -100,8 +103,8 @@ python3 scripts/news_digest/news_digest.py archive-plan --days 10 --verbose
 ```
 
 Useful flags on `run`: `--hours N` (window), `--sections dc,us_energy` (subset by group or
-key), `--no-ai` (skip the API), `--save-json path`, `--no-archive`, `--archive-week
-YYYY-MM-DD`, `--only-at-hour 10` (exit quietly unless the local hour in the configured
+key), `--no-ai` (skip the API), `--save-json path`, `--no-archive`, `--archive-period
+2019-Q4`, `--only-at-hour 10` (exit quietly unless the local hour in the configured
 timezone is 10; used by the cron guard).
 
 ## Tuning

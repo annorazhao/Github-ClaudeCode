@@ -6,8 +6,9 @@ Focus (configured in feeds.toml): the Washington region's traffic and transporta
 first, with Northern Virginia at state, county, and city level ahead of the District and
 Maryland; then United States news on transportation, energy, environment, and industrial
 organization; then a short world section; then an archive section that walks through the
-region's transportation history (curated landmarks for the first few days, then one
-historical week per day fetched from Google News with date operators).
+region's transportation history: one past year per email starting with last year and
+moving back, then one quarter per email, each with curated landmarks plus policy-focused
+dated Google News searches, at least ten items when the sources allow).
 
 Sources are RSS / Atom feeds and Google News RSS queries. Ranking and summaries come from
 the Claude API when ANTHROPIC_API_KEY is set; otherwise items are ranked by keyword
@@ -74,7 +75,8 @@ GROUP_LABELS = {
     "world": "World",
     "archive": "From the archive",
 }
-DEFAULT_LIMITS = {"world": 4, "archive": 8}
+DEFAULT_LIMITS = {"world": 4, "archive": 14}
+PERIOD_KINDS = ("year", "half", "quarter", "month", "week")
 DEFAULT_DC_LIMIT = 6
 DEFAULT_US_LIMIT = 5
 
@@ -172,13 +174,20 @@ def load_config(path: Path | str = DEFAULT_CONFIG) -> dict:
     a = cfg.setdefault("archive", {})
     a.setdefault("enabled", True)
     a.setdefault("anchor", date.today().isoformat())
-    a.setdefault("landmark_days", 4)
-    a.setdefault("start_week", "2016-01-04")
-    a.setdefault("weeks_per_day", 1)
-    a.setdefault("order", "forward")
-    a.setdefault("query", "")
-    a.setdefault("max_items", DEFAULT_LIMITS["archive"])
+    a.setdefault("passes", ["year", "quarter"])
+    a.setdefault("start_year", date.today().year - 1)
+    a.setdefault("end_year", 2016)
+    a.setdefault("roots", True)
+    a.setdefault("order", "backward")
+    a.setdefault("min_items", 10)
+    a.setdefault("max_items", 14)
+    a.setdefault("queries", [a["query"]] if a.get("query") else [])
     a.setdefault("landmarks_file", "archive.toml")
+    for kind in a["passes"]:
+        if kind not in PERIOD_KINDS:
+            raise ValueError(f"{path}: archive pass {kind!r} must be one of {PERIOD_KINDS}")
+    cfg["_policy_regex"] = compile_keywords(a.get("policy_keywords", []))
+    cfg["_incident_regex"] = compile_keywords(a.get("incident_keywords", []))
 
     for feed in cfg["feed"]:
         if "name" not in feed:
@@ -482,7 +491,7 @@ def _parse_feed(feed_cfg: dict, cfg: dict, now: datetime, window_start: datetime
         if verdict is None:
             continue
         age_hours = (now - published).total_seconds() / 3600
-        recency = 1.0 if age_hours <= 12 else 0.85 if age_hours <= 24 else 0.7
+        recency = 1.0 if feed_cfg.get("flat_recency") else (1.0 if age_hours <= 12 else 0.85 if age_hours <= 24 else 0.7)
         score = round(weight * verdict["boost"] * (1.0 + 0.35 * min(verdict["hits"], 6)) * recency, 4)
         jurisdiction, level = ("", "")
         if verdict["section"].startswith("dc_"):
@@ -531,7 +540,7 @@ def fetch_all(feeds: list[dict], cfg: dict, now: datetime, window_start: datetim
 
 def collect(cfg: dict, hours: float | None = None, now: datetime | None = None,
             only_sections: list[str] | None = None, archive: bool = True,
-            archive_day: int | None = None, archive_week: str | None = None) -> Collected:
+            archive_day: int | None = None, archive_period: str | None = None) -> Collected:
     now = now or datetime.now(timezone.utc)
     hours = float(hours or cfg["settings"]["lookback_hours"])
     window_start = now - timedelta(hours=hours)
@@ -550,11 +559,12 @@ def collect(cfg: dict, hours: float | None = None, now: datetime | None = None,
     if archive and cfg["archive"]["enabled"] and "archive" in wanted:
         landmarks = load_landmarks(cfg)
         archive_info = archive_plan(cfg, now.astimezone(tz).date(), landmarks,
-                                    day_override=archive_day, week_override=archive_week)
+                                    day_override=archive_day, period_override=archive_period)
         archive_items, archive_health = archive_collect(cfg, archive_info, now)
         health.extend(archive_health)
         archive_items = dedupe(archive_items)
         archive_info["landmark_items"] = [landmark_to_item(l, cfg) for l in archive_info.pop("landmarks", [])]
+        archive_info["min_items"] = int(cfg["archive"].get("min_items", 10))
 
     health.sort(key=lambda h: (h.status != "ok", h.name.lower()))
     sections_out = []
@@ -618,9 +628,8 @@ def load_landmarks(cfg: dict) -> list[dict]:
     return out
 
 
-def landmarks_in_week(landmarks: list[dict], week_start: date) -> list[dict]:
-    week_end = week_start + timedelta(days=7)
-    return [l for l in landmarks if week_start <= l["_date"] < week_end]
+def landmarks_between(landmarks: list[dict], start: date, end: date) -> list[dict]:
+    return [l for l in landmarks if start <= l["_date"] < end]
 
 
 def landmarks_this_week_in_history(landmarks: list[dict], today: date) -> list[dict]:
@@ -638,59 +647,138 @@ def landmarks_this_week_in_history(landmarks: list[dict], today: date) -> list[d
     return out
 
 
+def _add_months(d: date, n: int) -> date:
+    y, m = divmod(d.month - 1 + n, 12)
+    return date(d.year + y, m + 1, 1)
+
+
+def period_bounds(kind: str, start: date) -> tuple[date, date]:
+    if kind == "year":
+        return date(start.year, 1, 1), date(start.year + 1, 1, 1)
+    if kind == "half":
+        first = date(start.year, 1 if start.month <= 6 else 7, 1)
+        return first, _add_months(first, 6)
+    if kind == "quarter":
+        first = date(start.year, 3 * ((start.month - 1) // 3) + 1, 1)
+        return first, _add_months(first, 3)
+    if kind == "month":
+        first = date(start.year, start.month, 1)
+        return first, _add_months(first, 1)
+    monday = start - timedelta(days=start.weekday())
+    return monday, monday + timedelta(days=7)
+
+
+def period_label(kind: str, start: date) -> str:
+    if kind == "year":
+        return str(start.year)
+    if kind == "half":
+        return f"{start.year}, {'first' if start.month == 1 else 'second'} half"
+    if kind == "quarter":
+        return f"{start.year} Q{(start.month - 1) // 3 + 1}"
+    if kind == "month":
+        return start.strftime("%B %Y")
+    return "Week of " + start.strftime("%B %d, %Y").replace(" 0", " ")
+
+
+def period_list(kind: str, cfg: dict, today: date) -> list[tuple[date, date, str]]:
+    """Complete periods of one kind, from end_year up to start_year (years) or up to the
+    last complete period before today (finer kinds), in the configured order."""
+    a = cfg["archive"]
+    end_year, start_year = int(a["end_year"]), int(a["start_year"])
+    periods: list[tuple[date, date]] = []
+    if kind == "year":
+        periods = [(date(y, 1, 1), date(y + 1, 1, 1)) for y in range(end_year, start_year + 1)]
+    else:
+        cur, _ = period_bounds(kind, date(end_year, 1, 1))
+        while True:
+            s_, e_ = period_bounds(kind, cur)
+            if e_ > today:
+                break
+            periods.append((s_, e_))
+            cur = e_
+    if a.get("order", "backward") == "backward":
+        periods.reverse()
+    return [(s_, e_, period_label(kind, s_)) for s_, e_ in periods]
+
+
+def parse_period_override(text: str) -> tuple[str, date]:
+    """'2025' -> year; '2025-Q3' / '2025-H1' -> quarter / half; '2025-03' -> month;
+    '2025-03-02' -> the week containing that date."""
+    t = text.strip().upper()
+    if re.fullmatch(r"\d{4}", t):
+        return "year", date(int(t), 1, 1)
+    m = re.fullmatch(r"(\d{4})-Q([1-4])", t)
+    if m:
+        return "quarter", date(int(m.group(1)), 3 * (int(m.group(2)) - 1) + 1, 1)
+    m = re.fullmatch(r"(\d{4})-H([12])", t)
+    if m:
+        return "half", date(int(m.group(1)), 1 if m.group(2) == "1" else 7, 1)
+    if re.fullmatch(r"\d{4}-\d{2}", t):
+        return "month", date.fromisoformat(t + "-01")
+    return "week", date.fromisoformat(t)
+
+
+def archive_chunks(cfg: dict, today: date) -> list[tuple]:
+    """The whole archive schedule as an ordered list of chunks: ('period', kind, start,
+    end, label) entries for each configured pass, with one ('roots',) chunk after the
+    first pass when enabled."""
+    a = cfg["archive"]
+    chunks: list[tuple] = []
+    for i, kind in enumerate(a["passes"]):
+        for s_, e_, label in period_list(kind, cfg, today):
+            chunks.append(("period", kind, s_, e_, label))
+        if i == 0 and a.get("roots"):
+            chunks.append(("roots",))
+    return chunks
+
+
 def archive_plan(cfg: dict, today: date, landmarks: list[dict],
-                 day_override: int | None = None, week_override: str | None = None) -> dict:
-    """Stateless schedule: day d since `anchor` decides what the archive section carries.
-      d < landmark_days      -> tier-1 landmarks in date order, split evenly ("landmarks")
-      afterwards             -> one historical week per day from start_week ("week"),
-                                merged with landmarks dated in that week
-      past the last full week-> landmarks from this calendar week in earlier years
-    """
+                 day_override: int | None = None, period_override: str | None = None) -> dict:
+    """Stateless schedule: day d since `anchor` picks chunk d of archive_chunks(). With the
+    default passes ["year", "quarter"], day 0 is last year, day 1 the year before, down to
+    end_year, then a "policy roots" chunk of earlier landmarks, then one quarter per day
+    from the most recent complete quarter back to end_year. Past the last chunk the section
+    shows landmarks from this calendar week in earlier years."""
     a = cfg["archive"]
     if not a["enabled"]:
         return {"phase": "off"}
-    if week_override:
-        ws = date.fromisoformat(week_override)
-        ws -= timedelta(days=ws.weekday())
-        return _week_plan(ws, landmarks, index=None, total=None)
+    if period_override:
+        kind, start = parse_period_override(period_override)
+        s_, e_ = period_bounds(kind, start)
+        return _period_plan(kind, s_, e_, period_label(kind, s_), None, None, landmarks, a)
     anchor = date.fromisoformat(str(a["anchor"]))
     d = day_override if day_override is not None else (today - anchor).days
     if d < 0:
         return {"phase": "off", "title": f"Archive starts {anchor.isoformat()}"}
-    n = int(a["landmark_days"])
-    tier1 = [l for l in landmarks if l["tier"] == 1]
-    if d < n and tier1:
-        lo, hi = d * len(tier1) // n, (d + 1) * len(tier1) // n
-        chunk = tier1[lo:hi]
-        span = f"{chunk[0]['_date'].year} to {chunk[-1]['_date'].year}" if chunk else ""
-        return {"phase": "landmarks", "part": d + 1, "of": n, "landmarks": chunk,
-                "title": f"Landmarks, part {d + 1} of {n} ({span})" if span else f"Landmarks, part {d + 1} of {n}",
-                "note": "The most consequential policy and infrastructure events for the region's traffic, "
-                        "presented before the week-by-week archive begins. Each entry links to a dated web "
-                        "search for contemporary coverage."}
-    start_week = date.fromisoformat(str(a["start_week"]))
-    start_week -= timedelta(days=start_week.weekday())
-    last_week = today - timedelta(days=today.weekday() + 7)
-    total = max(0, (last_week - start_week).days // 7 + 1)
-    w = (d - n) * int(a["weeks_per_day"])
-    if w >= total:
-        hits = landmarks_this_week_in_history(landmarks, today)
-        return {"phase": "anniversary", "landmarks": hits,
+    chunks = archive_chunks(cfg, today)
+    if d >= len(chunks):
+        return {"phase": "anniversary", "landmarks": landmarks_this_week_in_history(landmarks, today),
                 "title": "This week in earlier years",
-                "note": "The week-by-week archive has reached the present. Landmarks that fall in this "
-                        "calendar week are shown."}
-    ws = start_week + timedelta(days=7 * w) if a["order"] != "backward" else last_week - timedelta(days=7 * w)
-    return _week_plan(ws, landmarks, index=w + 1, total=total)
+                "note": "The archive has walked through every configured period. Landmarks that fall in "
+                        "this calendar week are shown."}
+    chunk = chunks[d]
+    if chunk[0] == "roots":
+        cutoff = date(int(a["end_year"]), 1, 1)
+        return {"phase": "roots", "landmarks": [l for l in landmarks if l["_date"] < cutoff],
+                "index": d + 1, "of": len(chunks),
+                "title": f"Policy roots before {a['end_year']} ({d + 1} of {len(chunks)})",
+                "note": "Curated landmarks from before the year-by-year archive begins. Each links to a "
+                        "dated web search for contemporary coverage."}
+    _, kind, s_, e_, label = chunk
+    return _period_plan(kind, s_, e_, label, d + 1, len(chunks), landmarks, a)
 
 
-def _week_plan(ws: date, landmarks: list[dict], index: int | None, total: int | None) -> dict:
-    we = ws + timedelta(days=7)
-    label = ws.strftime("%B %d, %Y").replace(" 0", " ")
-    title = f"Week of {label}" + (f" ({index} of {total})" if index and total else "")
-    return {"phase": "week", "week_start": ws.isoformat(), "week_end": we.isoformat(),
-            "index": index, "of": total, "landmarks": landmarks_in_week(landmarks, ws), "title": title,
-            "note": "Coverage of the region's traffic and transportation policy from that week, found "
-                    "through a dated news search, plus any curated landmarks dated in the week."}
+def _period_plan(kind: str, s_: date, e_: date, label: str, index: int | None, total: int | None,
+                 landmarks: list[dict], a: dict) -> dict:
+    title = f"{label} in review" if kind == "year" else label
+    if index and total:
+        title += f" ({index} of {total})"
+    return {"phase": "period", "kind": kind, "period_start": s_.isoformat(), "period_end": e_.isoformat(),
+            "label": label, "index": index, "of": total, "landmarks": landmarks_between(landmarks, s_, e_),
+            "title": title,
+            "note": f"The most consequential transportation policy developments for the Washington region "
+                    f"in {label}: curated landmarks first, then coverage found through dated news searches and "
+                    f"ranked for policy relevance, at least {a.get('min_items', 10)} items when the sources allow."}
 
 
 def coverage_search_url(query: str, d: date, precision: str) -> str:
@@ -733,28 +821,42 @@ def landmark_to_item(l: dict, cfg: dict) -> dict:
 
 
 def archive_collect(cfg: dict, plan: dict, now: datetime) -> tuple[list[Item], list[FeedHealth]]:
-    """Fetch the historical week's coverage from Google News (date operators), classify it
-    with the same rules as live news, and mark everything as the archive section."""
-    if plan.get("phase") != "week" or not cfg["archive"].get("query"):
+    """Fetch the period's coverage through each configured Google News query with date
+    operators, keep transport items about the region, score them for policy relevance
+    (policy words up, incident-only stories out), and mark them as the archive section."""
+    a = cfg["archive"]
+    if plan.get("phase") != "period" or not a.get("queries"):
         return [], []
-    ws = date.fromisoformat(plan["week_start"])
-    we = date.fromisoformat(plan["week_end"])
-    query = f"{cfg['archive']['query']} after:{ws.isoformat()} before:{we.isoformat()}"
-    feed_cfg = {"name": f"Google News archive ({plan['week_start']})", "url": google_news_url(query),
-                "topic": "auto", "region": "dc", "subregion": cfg["settings"]["default_local_region"],
-                "weight": 1.0}
-    if feed_cfg["subregion"] not in cfg["regions"]:
-        feed_cfg.pop("subregion")
-    week_start_dt = datetime(ws.year, ws.month, ws.day, tzinfo=timezone.utc)
-    week_end_dt = datetime(we.year, we.month, we.day, tzinfo=timezone.utc)
-    items, health = parse_feed(feed_cfg, cfg, now=week_end_dt, window_start=week_start_dt)
-    kept = []
-    for it in items:
-        if it.section.startswith("dc_") or it.topic == "transportation":
+    s_ = date.fromisoformat(plan["period_start"])
+    e_ = date.fromisoformat(plan["period_end"])
+    start_dt = datetime(s_.year, s_.month, s_.day, tzinfo=timezone.utc)
+    end_dt = datetime(e_.year, e_.month, e_.day, tzinfo=timezone.utc)
+    subregion = cfg["settings"]["default_local_region"]
+    items: list[Item] = []
+    health: list[FeedHealth] = []
+    for n, query in enumerate(a["queries"], 1):
+        feed_cfg = {"name": f"Google News archive {n} ({plan['label']})",
+                    "url": google_news_url(f"{query} after:{s_.isoformat()} before:{e_.isoformat()}"),
+                    "topic": "auto", "region": "dc", "weight": 1.0, "flat_recency": True}
+        if subregion in cfg["regions"]:
+            feed_cfg["subregion"] = subregion
+        got, h = parse_feed(feed_cfg, cfg, now=end_dt, window_start=start_dt)
+        kept = []
+        for it in got:
+            if not (it.section.startswith("dc_") or it.topic == "transportation"):
+                continue
+            text = f"{it.title}. {it.summary}"
+            policy = keyword_hits(text, cfg["_policy_regex"])
+            incident = keyword_hits(text, cfg["_incident_regex"])
+            if incident and not policy:
+                continue
+            it.score = round(it.score * (1 + 0.5 * min(policy, 6)) / (1 + 0.5 * incident), 4)
             it.section = "archive"
             kept.append(it)
-    health.items_kept = len(kept)
-    return kept, [health]
+        h.items_kept = len(kept)
+        items.extend(kept)
+        health.append(h)
+    return items, health
 
 
 # --------------------------------------------------------------------------- summarizing
@@ -765,7 +867,7 @@ The digest has four groups, in this order of priority:
 1. Washington region traffic and transportation policy, split into Northern Virginia (the top priority: state, county, and city or town actions, road and transit conditions, tolling, transit funding), the District of Columbia, Maryland, and region-wide bodies such as WMATA. Prefer concrete policy actions, project milestones, funding decisions, enforcement changes, data releases, and notable local reporting over routine incident reports; a single crash is rarely worth including unless it changed policy or closed a corridor for a long time.
 2. United States news on each topic: policy and regulatory actions, enforcement cases and court decisions, market and price moves, major corporate decisions, data releases, and notable research.
 3. Major stories elsewhere in the world: a few items only, chosen for research relevance rather than completeness.
-4. An archive section when present: coverage from one historical week, summarized as a short retrospective (write in the past tense and mention the year).
+4. An archive section when present: the most consequential transportation policy developments for the Washington region in one past period (a year or a quarter). Pick at least the section's min_items when the candidates allow, favoring policy decisions, funding and tolling changes, project openings and cancellations, governance and enforcement changes, and major studies over crashes, closures, and routine service notices. Order by importance, not date. Write each as a short retrospective in the past tense, naming the month and year.
 
 You receive candidate items grouped by section. Each item has an id, title, source, publication time, URL, and the feed's own blurb. Select and summarize. Skip marketing, listicles, opinion with no news, and near-duplicates of a story already chosen in any section. Balance sources; do not let one outlet dominate a section.
 
@@ -818,6 +920,7 @@ def _candidates_for_prompt(collected: Collected) -> dict:
         out[s["key"]] = {
             "label": f"{s['group_label']} / {s['label']}",
             "max_items": None,  # filled by caller
+            **({"min_items": int(collected.archive.get("min_items", 0))} if s["key"] == "archive" and collected.archive.get("min_items") else {}),
             "items": [
                 {"id": i["id"], "title": i["title"], "source": i["source"], "published": i["published"],
                  "url": i["url"], "blurb": i["summary"],
@@ -942,9 +1045,11 @@ def summarize_fallback(collected: Collected, cfg: dict) -> dict:
     return {"top_line": top_line, "sections": sections, "generated_by": "keyword-fallback"}
 
 
-def merge_archive(digest: dict, archive: dict, cfg: dict) -> None:
+def merge_archive(digest: dict, archive: dict, cfg: dict, candidates: list[dict] | None = None) -> None:
     """Attach the archive plan's landmarks and note to the digest's archive section,
-    creating the section if the summarizer (or a Claude session) left it out."""
+    creating the section if the summarizer (or a Claude session) left it out. Landmarks
+    come first; searched items are topped up from `candidates` to reach min_items and the
+    whole section is capped at max_items (landmarks are never dropped)."""
     if not archive or archive.get("phase") in (None, "off"):
         return
     section = next((s for s in digest["sections"] if (s.get("section") or s.get("topic")) == "archive"), None)
@@ -957,7 +1062,22 @@ def merge_archive(digest: dict, archive: dict, cfg: dict) -> None:
     section["title"] = archive.get("title", "")
     existing = {i.get("headline") for i in section["items"] if i.get("kind") == "landmark"}
     landmarks = [l for l in archive.get("landmark_items", []) if l["headline"] not in existing]
-    section["items"] = landmarks + section["items"]
+    searched = [i for i in section["items"] if i.get("kind") != "landmark"]
+    a = cfg["archive"]
+    min_items, max_items = int(a.get("min_items", 10)), cap_for(cfg, "archive")
+    if candidates:
+        chosen = {i.get("url") for i in searched}
+        for cand in sorted(candidates, key=lambda c: c.get("score", 0), reverse=True):
+            if len(landmarks) + len(searched) >= min_items:
+                break
+            if cand["url"] in chosen:
+                continue
+            chosen.add(cand["url"])
+            searched.append({"headline": cand["title"], "url": cand["url"], "source": cand["source"],
+                             "published": cand["published"], "summary": clean_text(cand["summary"], 320),
+                             "why_it_matters": "", "jurisdiction": cand.get("jurisdiction", ""),
+                             "level": cand.get("level", "")})
+    section["items"] = landmarks + searched[: max(0, max_items - len(landmarks))]
 
 
 def build_digest(collected: Collected, cfg: dict, use_ai: bool = True) -> dict:
@@ -966,7 +1086,8 @@ def build_digest(collected: Collected, cfg: dict, use_ai: bool = True) -> dict:
         digest = summarize_with_claude(collected, cfg)
     if digest is None:
         digest = summarize_fallback(collected, cfg)
-    merge_archive(digest, collected.archive, cfg)
+    archive_candidates = next((s["items"] for s in collected.sections if s["key"] == "archive"), [])
+    merge_archive(digest, collected.archive, cfg, candidates=archive_candidates)
     tz = ZoneInfo(cfg["settings"]["timezone"])
     digest["date"] = datetime.fromisoformat(collected.generated_at).astimezone(tz).strftime("%Y-%m-%d")
     digest["feed_health"] = collected.feed_health
@@ -1301,15 +1422,18 @@ def deliver(digest: dict, cfg: dict, out: str | None, dry_run: bool) -> int:
 
 def log_stats(collected: Collected) -> None:
     s = collected.stats
+    n_cand = len(next((x["items"] for x in collected.sections if x["key"] == "archive"), []))
+    n_land = len(collected.archive.get("landmark_items", []))
     log(f"feeds ok {s['feeds_ok']}/{s['feeds']}; items in window {s['items_in_window']}; "
-        f"kept {s['items_kept']}; offered {s['items_offered']}; archive: {collected.archive.get('title', 'off')}")
+        f"kept {s['items_kept']}; offered {s['items_offered']}; archive: {collected.archive.get('title', 'off')} "
+        f"({n_land} landmarks, {n_cand} searched candidates)")
 
 
 # --------------------------------------------------------------------------- CLI
 
 def _collect_from_args(cfg: dict, args) -> Collected:
     return collect(cfg, hours=args.hours, only_sections=args.sections, archive=not args.no_archive,
-                   archive_day=args.archive_day, archive_week=args.archive_week)
+                   archive_day=args.archive_day, archive_period=args.archive_period)
 
 
 def cmd_collect(args) -> int:
@@ -1339,7 +1463,7 @@ def cmd_send(args) -> int:
         tz = ZoneInfo(cfg["settings"]["timezone"])
         landmarks = load_landmarks(cfg)
         plan = archive_plan(cfg, datetime.now(tz).date(), landmarks,
-                            day_override=args.archive_day, week_override=args.archive_week)
+                            day_override=args.archive_day, period_override=args.archive_period)
         plan["landmark_items"] = [landmark_to_item(l, cfg) for l in plan.pop("landmarks", [])]
         merge_archive(digest, plan, cfg)
     digest.setdefault("generated_by", "claude-in-session")
@@ -1388,14 +1512,16 @@ def cmd_archive_plan(args) -> int:
     today = date.fromisoformat(args.date) if args.date else datetime.now(tz).date()
     for offset in range(args.days):
         plan = archive_plan(cfg, today + timedelta(days=offset), landmarks,
-                            day_override=args.archive_day, week_override=args.archive_week)
+                            day_override=args.archive_day, period_override=args.archive_period)
         marks = plan.get("landmarks", [])
         print(f"{(today + timedelta(days=offset)).isoformat()}  {plan.get('phase'):<12} {plan.get('title', '')}"
               + (f"  [{len(marks)} landmark(s)]" if marks else ""))
         if args.verbose:
             for l in marks:
                 print(f"    {landmark_date_label(l):<20} {l['title']}")
-    print(f"\n{len(landmarks)} landmarks loaded ({sum(1 for l in landmarks if l['tier'] == 1)} tier 1)")
+    chunks = archive_chunks(cfg, today)
+    print(f"\n{len(landmarks)} landmarks loaded ({sum(1 for l in landmarks if l['tier'] == 1)} tier 1); "
+          f"{len(chunks)} scheduled chunks before anniversaries")
     return 0
 
 
@@ -1409,7 +1535,8 @@ def build_parser() -> argparse.ArgumentParser:
     def archive_opts(sp):
         sp.add_argument("--no-archive", action="store_true", help="omit the archive section")
         sp.add_argument("--archive-day", type=int, metavar="N", help="pretend today is day N of the archive schedule")
-        sp.add_argument("--archive-week", metavar="YYYY-MM-DD", help="force the archive to a specific historical week")
+        sp.add_argument("--archive-period", metavar="PERIOD",
+                        help="force the archive to a period: 2025, 2025-Q3, 2025-H1, 2025-03, or 2025-03-02 (that week)")
 
     def collect_opts(sp):
         sp.add_argument("--hours", type=float, help="lookback window (default from config)")

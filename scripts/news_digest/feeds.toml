@@ -352,31 +352,56 @@ us_default = 5
 world = 4
 
 # ---------------------------------------------------------------------------
-# Archive: the region's transportation history, delivered in chunks.
-#   anchor          the first day the archive ran; day 0 of the schedule. Do not change it
-#                   after launch, or the chunks shift.
-#   landmark_days   the first N days carry the tier-1 landmarks from archive.toml, in date
-#                   order, split evenly ("the most major ones for the first few days")
-#   start_week      afterwards, one historical week per day starting here (a Monday)
-#   weeks_per_day   raise to move through history faster
-#   order           forward (2016 onward) or backward (most recent full week first)
-#   query           Google News query for the historical week; after:/before: dates are appended
-#   max_items       items in the archive section
-# Landmarks dated inside the week being covered are shown alongside the searched coverage.
-# When the schedule reaches the present, the section switches to "this week in earlier years".
-# `news_digest.py archive-plan --days 10 --verbose` previews the schedule.
+# Archive: the region's transportation history, one chunk per email.
+#   anchor      the first day the archive ran; day 0 of the schedule. Do not change it after
+#               launch, or the chunks shift.
+#   passes      day 0 is start_year, day 1 the year before, down to end_year ("year" pass);
+#               then, with roots = true, one chunk of curated landmarks from before end_year;
+#               then the next pass ("quarter": one quarter per email from the most recent
+#               complete quarter back to end_year) for depth. Kinds: year, half, quarter,
+#               month, week. When every chunk has run, the section shows "this week in
+#               earlier years".
+#   min_items   the section is topped up from the searched candidates to at least this many
+#   max_items   cap per email (landmarks are never dropped)
+#   queries     Google News searches run per period with after:/before: dates appended;
+#               results are classified like live news, then scored for policy relevance
+#   policy_keywords    boost signs of a policy decision or milestone
+#   incident_keywords  stories matching these and no policy word are dropped (crashes, weather)
+# `news_digest.py archive-plan --days 12 --verbose` previews the schedule;
+# `run --archive-period 2019` (or 2019-Q4, 2019-H1, 2019-11, 2019-11-04) replays one chunk.
 # ---------------------------------------------------------------------------
 
 [archive]
 enabled = true
-anchor = "2026-09-16"
-landmark_days = 4
-start_week = "2016-01-04"
-weeks_per_day = 1
-order = "forward"
-max_items = 8
+anchor = "2026-09-15"
+passes = ["year", "quarter"]
+start_year = 2025
+end_year = 2016
+roots = true
+order = "backward"
+min_items = 10
+max_items = 14
 landmarks_file = "archive.toml"
-query = '("Northern Virginia" OR Fairfax OR Arlington OR Loudoun OR "Prince William" OR Alexandria OR VDOT OR WMATA OR Metrorail OR "Express Lanes" OR "D.C." OR DDOT OR Maryland OR "Purple Line") (traffic OR transportation OR transit OR toll OR tolls OR highway OR commute OR Metro)'
+queries = [
+  '(VDOT OR "Commonwealth Transportation Board" OR "General Assembly" OR "Smart Scale" OR "Express Lanes" OR toll OR tolls) ("Northern Virginia" OR Fairfax OR Arlington OR Loudoun OR "Prince William" OR Alexandria)',
+  '("Board of Supervisors" OR "County Board" OR "City Council" OR "Town Council") (Fairfax OR Arlington OR Loudoun OR "Prince William" OR Alexandria OR "Falls Church" OR Herndon OR Vienna OR Leesburg OR Manassas) (transportation OR road OR transit OR parking OR bus OR toll OR traffic)',
+  '(WMATA OR Metrorail OR Metrobus OR "Metro board" OR "Silver Line" OR VRE OR "Purple Line" OR "Long Bridge") (funding OR fares OR budget OR opens OR approves OR agreement OR safety OR ridership)',
+  "(DDOT OR \"D.C. Council\" OR MDOT OR \"Montgomery County\" OR \"Prince George's\" OR \"I-270\" OR \"American Legion Bridge\" OR \"Vision Zero\") (transportation OR transit OR toll OR \"speed cameras\" OR \"bus lanes\" OR plan OR approves)",
+]
+policy_keywords = [
+  "approve", "approves", "approved", "approval", "vote", "votes", "voted", "passes", "passed",
+  "signs", "signed", "law", "bill", "legislation", "General Assembly", "Council", "Board of Supervisors",
+  "County Board", "budget", "funding", "fund", "grant", "bond", "tax", "fee", "fees", "toll", "tolls",
+  "tolling", "fare", "fares", "plan", "study", "contract", "agreement", "partnership", "P3",
+  "opens", "opening", "groundbreaking", "completed", "cancels", "cancelled", "canceled", "delay",
+  "delayed", "ordinance", "policy", "rule", "regulation", "Vision Zero", "speed cameras",
+  "enforcement", "ridership", "service cuts", "expansion", "Smart Scale", "VDOT", "WMATA", "Metro board",
+  "NVTA", "NVTC", "DDOT", "MDOT", "governor", "mayor", "supervisor", "supervisors", "delegate", "senator",
+]
+incident_keywords = [
+  "crash", "crashes", "killed", "dies", "dead", "injured", "shooting", "stabbing", "arrested", "charged",
+  "police", "pursuit", "fire", "snow", "storm", "flooding", "power outage", "lottery", "weather",
+]
 
 # ===========================================================================
 # Washington region: local sources (region = "dc")
