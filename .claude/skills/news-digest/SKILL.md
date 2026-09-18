@@ -190,7 +190,7 @@ Two schedulers exist so the digest arrives even when one is unavailable. Both ta
 
 | Scheduler | Where it runs | Gathers | Summarizes | Sends | Setup |
 |-----------|---------------|---------|------------|-------|-------|
-| `.github/workflows/news-digest.yml` | GitHub Actions, daily cron (14:00 and 15:00 UTC with a local-hour guard, so exactly one fires at 10:00 local across daylight-saving changes) | RSS + Google News feeds | Claude API if `ANTHROPIC_API_KEY` secret is set, else keyword ranking | SMTP | Repository secrets listed in the workflow header; must be on the default branch |
+| `.github/workflows/news-digest.yml` | GitHub Actions, daily cron (14:00 and 15:00 UTC; the `--only-for-cron` guard lets through whichever one is 10:00 local that date, so daylight saving is handled and a late start still sends) | RSS + Google News feeds | Claude API if `ANTHROPIC_API_KEY` secret is set, else keyword ranking | SMTP | Repository secrets listed in the workflow header; must be on the default branch |
 | Claude Code Routine | A fresh cloud session at `0 14 * * *` UTC (10:00 EDT; 09:00 EST after November until the cron is adjusted) | This skill (feeds, or WebSearch when fetches are blocked) | Claude in the session | SMTP if the environment carries the variables, else a connector, else the run-notification email | Manage under claude.ai → Routines |
 
 The archive schedule is stateless: day number since `[archive].anchor` in `feeds.toml`
@@ -198,8 +198,12 @@ decides the chunk (day 0 is last year, then each earlier year to 2016, then poli
 then one quarter per day), so both schedulers show the same chunk on the same day. Preview
 it with `python3 scripts/news_digest/news_digest.py archive-plan --days 12 --verbose`.
 
-GitHub may delay scheduled workflows by several minutes and disables schedules on public
-repositories with no commits for 60 days. The Routine consumes session usage on each run.
+GitHub starts scheduled workflows late, sometimes by hours, so treat 10:00 as the target
+rather than the delivery time. The guard tests the cron that was *scheduled*
+(`github.event.schedule`), never the clock at start-up, so a delayed run still sends. A
+guard written against the wall clock silently drops the whole day. GitHub also disables
+schedules on public repositories with no commits for 60 days. The Routine consumes session
+usage on each run.
 
 ---
 
@@ -276,3 +280,10 @@ transport (those go to the US topic sections by design).
 **Cause:** Schedules fire only from the default branch, and only after the workflow file
 has been merged there.
 **Solution:** Merge, then trigger once by hand from the Actions tab to confirm the secrets.
+
+**Symptom:** The scheduled run succeeds in seconds but no email arrives
+**Cause:** A time guard rejected it. The Actions log shows a `skipping:` line, and the send
+step takes zero seconds.
+**Solution:** Scheduled runs must use `--only-for-cron "$SCHEDULE_CRON" --target-hour 10`,
+which reads the scheduled cron. `--only-at-hour` compares against the clock at start-up and
+therefore fails whenever GitHub delays the run past the target hour.

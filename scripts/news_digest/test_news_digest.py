@@ -215,12 +215,16 @@ query = "anniversary"
 
 
 class Fixture:
-    def __init__(self):
+    def __init__(self, now: datetime = NOW):
+        """`now` anchors the generated feed timestamps. Tests that drive collect() directly
+        pass now=NOW for determinism; tests that go through the CLI (which reads the real
+        clock) pass the current time so the items land inside the lookback window."""
         self.dir = tempfile.TemporaryDirectory()
+        self.now = now
         d = Path(self.dir.name)
-        fresh = NOW - timedelta(hours=3)
-        older = NOW - timedelta(hours=20)
-        stale = NOW - timedelta(hours=40)
+        fresh = now - timedelta(hours=3)
+        older = now - timedelta(hours=20)
+        stale = now - timedelta(hours=40)
         (d / "transit.xml").write_text(rss([
             ("Transit agency expands rail service", "https://ex.org/rail?utm_source=x", fresh,
              "<p>The agency added <b>rail</b> frequency on two lines.</p>"),
@@ -301,6 +305,22 @@ class TextUtilsTests(unittest.TestCase):
         self.assertTrue(nd.should_run_now(10, "America/New_York", at_10_edt))
         self.assertFalse(nd.should_run_now(10, "America/New_York", at_10_est - timedelta(hours=1)))
         self.assertTrue(nd.should_run_now(10, "America/New_York", at_10_est))
+
+    def test_cron_targets_local_hour_survives_late_starts(self):
+        # 14:00 UTC is 10:00 New York under daylight saving; 15:00 UTC under standard time.
+        sept, dec = date(2026, 9, 17), date(2026, 12, 17)
+        self.assertTrue(nd.cron_targets_local_hour("0 14 * * *", 10, "America/New_York", sept))
+        self.assertFalse(nd.cron_targets_local_hour("0 15 * * *", 10, "America/New_York", sept))
+        self.assertFalse(nd.cron_targets_local_hour("0 14 * * *", 10, "America/New_York", dec))
+        self.assertTrue(nd.cron_targets_local_hour("0 15 * * *", 10, "America/New_York", dec))
+        # exactly one cron per date, so the digest is never sent twice or skipped
+        for day in (sept, dec):
+            fired = [c for c in ("0 14 * * *", "0 15 * * *")
+                     if nd.cron_targets_local_hour(c, 10, "America/New_York", day)]
+            self.assertEqual(len(fired), 1, day)
+        # a schedule the guard cannot read must never block a run
+        for cron in ("*/30 * * * *", "", "nonsense", "0 H * * *"):
+            self.assertTrue(nd.cron_targets_local_hour(cron, 10, "America/New_York", sept))
 
     def test_google_news_url_encodes_query(self):
         url = nd.google_news_url('("Fairfax County") traffic when:2d')
@@ -727,7 +747,7 @@ class EmailTests(unittest.TestCase):
 
 class CliTests(unittest.TestCase):
     def test_collect_send_round_trip_via_cli_with_landmark_merge(self):
-        fx = Fixture()
+        fx = Fixture(now=datetime.now(timezone.utc))
         try:
             d = Path(fx.dir.name)
             items = d / "items.json"
@@ -775,6 +795,26 @@ class CliTests(unittest.TestCase):
         finally:
             fx.cleanup()
 
+    def test_only_for_cron_guard_runs_or_skips_without_touching_the_clock(self):
+        """The scheduled path must not depend on when the runner starts: the matching cron
+        proceeds and the other exits 0, whatever the wall clock says."""
+        fx = Fixture(now=datetime.now(timezone.utc))
+        try:
+            out = Path(fx.dir.name) / "d.html"
+            with mock.patch.object(nd, "deliver", return_value=0) as deliver:
+                rc = nd.main(["run", "--config", str(fx.config_path), "--dry-run", "--out", str(out),
+                              "--only-for-cron", "0 15 * * *", "--target-hour", "10"])
+            self.assertEqual(rc, 0)
+            deliver.assert_not_called()          # December cron: skipped in September
+            with mock.patch.object(nd, "cron_targets_local_hour", return_value=True), \
+                 mock.patch.object(nd, "should_run_now", return_value=False):
+                rc = nd.main(["run", "--config", str(fx.config_path), "--dry-run", "--out", str(out),
+                              "--only-for-cron", "0 14 * * *"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(out.exists())        # ran even though the clock is not 10:00
+        finally:
+            fx.cleanup()
+
     def test_archive_plan_command(self):
         fx = Fixture()
         try:
@@ -810,12 +850,17 @@ class RealConfigTests(unittest.TestCase):
             self.assertIn(l["confidence"], ("high", "medium"), l["title"])
             self.assertTrue(l["query"], l["title"])
         self.assertGreaterEqual(len(cfg["archive"]["queries"]), 3)
-        plan = nd.archive_plan(cfg, date(2026, 9, 15), landmarks)
-        self.assertEqual((plan["phase"], plan["label"]), ("period", "2025"))
+        anchor = date.fromisoformat(str(cfg["archive"]["anchor"]))
+        plan = nd.archive_plan(cfg, anchor, landmarks)
+        self.assertEqual((plan["phase"], plan["label"]), ("period", str(cfg["archive"]["start_year"])))
         self.assertGreaterEqual(len(plan["landmarks"]), 5)
-        chunks = nd.archive_chunks(cfg, date(2026, 9, 15))
-        self.assertEqual(chunks[0][4], "2025")
-        self.assertEqual(chunks[10], ("roots",))
+        # every year from start_year down to end_year gets exactly one chunk, then the roots
+        years = [c[4] for c in nd.archive_chunks(cfg, anchor) if c[0] == "period" and c[1] == "year"]
+        self.assertEqual(years, [str(y) for y in range(int(cfg["archive"]["start_year"]),
+                                                      int(cfg["archive"]["end_year"]) - 1, -1)])
+        chunks = nd.archive_chunks(cfg, anchor)
+        self.assertEqual(chunks[0][4], str(cfg["archive"]["start_year"]))
+        self.assertEqual(chunks[len(years)], ("roots",))
 
 
 if __name__ == "__main__":

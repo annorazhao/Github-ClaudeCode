@@ -10,6 +10,10 @@ If you have forked this template, see the **Upgrading** section at the bottom fo
 
 A personal-productivity addition on top of v1.10.0: the template gains a scheduled news digest, its first workflow that runs without a person at the keyboard. No changes to existing skills, agents, rules, or hooks.
 
+### Fixed
+
+- **Scheduled digests were built and then discarded.** The workflow guarded scheduled runs with `--only-at-hour 10`, which compares the configured timezone against the clock when the job starts. GitHub began the 14:00 UTC cron around 18:00 UTC on consecutive days, so the guard skipped every run and no email went out, while the run still reported success. Scheduled runs now use `--only-for-cron "$SCHEDULE_CRON" --target-hour 10`, which tests the nominal time of the cron that was scheduled (`github.event.schedule`) and is therefore unaffected by how late the platform starts the job. Exactly one of the two UTC crons passes on any date, including across daylight-saving changes. `--only-at-hour` remains for punctual schedulers.
+
 ### Added
 
 - **`/news-digest` skill** (`.claude/skills/news-digest/`) — builds a daily email that opens with the Washington region's traffic and transportation policy (Northern Virginia at state, county, and city or town level, then the District, Maryland, and region-wide bodies), continues with United States news on transportation, energy, environment, and industrial organization / antitrust, adds a few major world stories, and closes with an archive section on the region's transportation history: one past year per email starting with last year and moving back to 2016, then one quarter per email, each built from curated landmarks plus policy-focused dated Google News searches and topped up to at least ten items when the sources allow. Collects from RSS feeds and Google News queries, has Claude select and summarize per section with strict grounding in the source text, and delivers over SMTP, an email connector, or (failing both) the session's final message. Falls back to WebSearch when the sandbox's egress policy blocks feed hosts. `disable-model-invocation: true`, since it sends mail.
