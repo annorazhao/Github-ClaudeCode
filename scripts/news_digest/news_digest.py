@@ -29,7 +29,7 @@ Environment (only needed for sending / AI summaries)
   ANTHROPIC_API_KEY (optional), DIGEST_MODEL (claude-opus-5), DIGEST_EFFORT (medium)
 
 Exit codes
-  0  ok (also: skipped by --only-at-hour, which is a normal outcome in CI)
+  0  ok (also: skipped by --only-for-cron / --only-at-hour, a normal outcome in CI)
   2  configuration error (missing SMTP settings, bad digest JSON, bad config)
   3  every feed failed (network blocked or all sources dead)
 
@@ -1384,8 +1384,31 @@ def log(msg: str) -> None:
 
 
 def should_run_now(hour: int, tz_name: str, now: datetime | None = None) -> bool:
+    """True when the wall clock in tz_name is inside `hour`. Only safe for a punctual
+    scheduler; GitHub Actions cron can start hours late, so scheduled runs use
+    cron_targets_local_hour instead."""
     now = now or datetime.now(timezone.utc)
     return now.astimezone(ZoneInfo(tz_name)).hour == hour
+
+
+def cron_targets_local_hour(cron: str, target_hour: int, tz_name: str,
+                            today: date | None = None) -> bool:
+    """True when the *nominal* firing time of `cron` lands on target_hour in tz_name today.
+
+    Several UTC crons are needed to hit one local hour year-round (14:00 UTC is 10:00 in
+    New York under daylight saving, 15:00 UTC under standard time). Checking the cron that
+    was scheduled, rather than the clock when the runner starts, lets exactly one of them
+    proceed even when the platform starts the job hours late. An unparseable or non-numeric
+    schedule never blocks the run."""
+    m = re.match(r"^\s*(\S+)\s+(\S+)", cron or "")
+    if not m:
+        return True
+    minute, hour = m.group(1), m.group(2)
+    if not (minute.isdigit() and hour.isdigit()):
+        return True
+    today = today or datetime.now(timezone.utc).date()
+    nominal = datetime(today.year, today.month, today.day, int(hour), int(minute), tzinfo=timezone.utc)
+    return nominal.astimezone(ZoneInfo(tz_name)).hour == target_hour
 
 
 def write_outputs(out: Path, html_body: str, text: str, digest: dict, cfg: dict) -> None:
@@ -1473,6 +1496,11 @@ def cmd_send(args) -> int:
 
 def cmd_run(args) -> int:
     cfg = load_config(args.config)
+    tz_name = cfg["settings"]["timezone"]
+    if args.only_for_cron and not cron_targets_local_hour(args.only_for_cron, args.target_hour, tz_name):
+        log(f"skipping: cron {args.only_for_cron!r} is not the {args.target_hour}:00 "
+            f"{tz_name} firing today (another cron in the schedule is)")
+        return 0
     if args.only_at_hour is not None and not should_run_now(args.only_at_hour, cfg["settings"]["timezone"]):
         local = datetime.now(ZoneInfo(cfg["settings"]["timezone"])).strftime("%H:%M %Z")
         log(f"skipping: local time is {local}, not the {args.only_at_hour}:00 hour")
@@ -1562,7 +1590,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--save-json", help="write the digest JSON here")
     sp.add_argument("--dry-run", action="store_true", help="render only; never send")
     sp.add_argument("--only-at-hour", type=int, metavar="H",
-                    help="exit 0 without doing anything unless the local hour (config timezone) is H")
+                    help="exit 0 unless the local hour (config timezone) is H right now; for a "
+                         "punctual scheduler only, since a late start fails the check")
+    sp.add_argument("--only-for-cron", metavar="CRON",
+                    help="exit 0 unless this cron's nominal UTC time is --target-hour local today; "
+                         "pass the schedule that triggered the run (GitHub: github.event.schedule). "
+                         "Unaffected by how late the run actually starts")
+    sp.add_argument("--target-hour", type=int, default=10, metavar="H",
+                    help="local hour --only-for-cron aims at (default 10)")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("check-feeds", help="fetch every feed and print a health table")

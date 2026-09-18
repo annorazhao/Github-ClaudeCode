@@ -104,8 +104,14 @@ python3 scripts/news_digest/news_digest.py archive-plan --days 10 --verbose
 
 Useful flags on `run`: `--hours N` (window), `--sections dc,us_energy` (subset by group or
 key), `--no-ai` (skip the API), `--save-json path`, `--no-archive`, `--archive-period
-2019-Q4`, `--only-at-hour 10` (exit quietly unless the local hour in the configured
-timezone is 10; used by the cron guard).
+2019-Q4`.
+
+Two guards exist for schedulers that fire more than one cron to hit a single local hour.
+`--only-for-cron "0 14 * * *" --target-hour 10` proceeds only when that cron's nominal UTC
+time is 10:00 in the configured timezone today; it ignores when the run actually starts, so
+it is the right choice on GitHub Actions, where scheduled jobs often begin hours late. The
+workflow passes `github.event.schedule` into it. `--only-at-hour 10` compares against the
+wall clock instead and suits a punctual scheduler only.
 
 ## Tuning
 

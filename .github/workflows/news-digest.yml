@@ -1,9 +1,13 @@
 # Daily news digest — transportation, energy, environment, industrial organization.
 #
-# Fires at 10:00 America/New_York every day. GitHub cron is UTC-only, so two crons are
-# scheduled (14:00 and 15:00 UTC) and the script's --only-at-hour guard lets exactly one
-# of them proceed depending on daylight saving time. Scheduled workflows only run from
-# the repository's default branch, and GitHub may delay them by several minutes.
+# Aims at 10:00 America/New_York every day. GitHub cron is UTC-only, so two crons are
+# scheduled (14:00 and 15:00 UTC) and the script's --only-for-cron guard lets exactly one
+# of them proceed depending on daylight saving time. The guard tests the cron that was
+# *scheduled* (github.event.schedule), not the clock when the runner starts, because
+# GitHub routinely starts scheduled jobs late — delays of several hours happen on busy
+# shared runners. A delayed run therefore still sends; the email is simply later than
+# 10:00. If it arrives too late too often, move both crons earlier by the same amount.
+# Scheduled workflows only run from the repository's default branch.
 #
 # Required repository secrets (Settings -> Secrets and variables -> Actions):
 #   SMTP_HOST       e.g. smtp.gmail.com
@@ -70,6 +74,7 @@ jobs:
           DIGEST_FROM: ${{ secrets.DIGEST_FROM }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_CRON: ${{ github.event.schedule }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
           INPUT_HOURS: ${{ inputs.hours }}
           INPUT_NO_AI: ${{ inputs.no_ai }}
@@ -77,7 +82,8 @@ jobs:
           set -euo pipefail
           args=(run --out digest/digest.html --save-json digest/digest.json)
           if [ "$EVENT_NAME" = "schedule" ]; then
-            args+=(--only-at-hour 10)          # one of the two UTC crons matches 10:00 New York
+            # Exactly one of the two UTC crons is 10:00 New York on any given date.
+            args+=(--only-for-cron "$SCHEDULE_CRON" --target-hour 10)
           fi
           if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then args+=(--dry-run); fi
           if [ "${INPUT_NO_AI:-false}" = "true" ]; then args+=(--no-ai); fi
