@@ -12,6 +12,7 @@ A personal-productivity addition on top of v1.10.0: the template gains a schedul
 
 ### Fixed
 
+- **A single GitHub problem no longer costs a day's digest.** On 2026-11-11 the one sending cron was cancelled because no hosted runner picked it up, and nothing retried. The workflow now makes about 14 attempts a day at :17 past the hour. Each attempt skips before 10:00 New York time, skips in seconds when a per-day cache marker shows the digest already went out, and otherwise sends and writes the marker only after a successful send. Late starts, dropped schedules, cancelled jobs, and failed sends (feeds down, SMTP errors) all hand the day to the next attempt. Manual runs send regardless and record the marker; a new `respect_daily_guard` input makes a manual run behave like a scheduled attempt.
 - **Scheduled digests were built and then discarded.** The workflow guarded scheduled runs with `--only-at-hour 10`, which compares the configured timezone against the clock when the job starts. GitHub began the 14:00 UTC cron around 18:00 UTC on consecutive days, so the guard skipped every run and no email went out, while the run still reported success. Scheduled runs now use `--only-for-cron "$SCHEDULE_CRON" --target-hour 10`, which tests the nominal time of the cron that was scheduled (`github.event.schedule`) and is therefore unaffected by how late the platform starts the job. Exactly one of the two UTC crons passes on any date, including across daylight-saving changes. `--only-at-hour` remains for punctual schedulers.
 
 ### Added

@@ -1,13 +1,17 @@
-# Daily news digest — transportation, energy, environment, industrial organization.
+# Daily news digest — Washington-region transportation policy, US transportation, energy,
+# environment, industrial organization, and a history archive.
 #
-# Aims at 10:00 America/New_York every day. GitHub cron is UTC-only, so two crons are
-# scheduled (14:00 and 15:00 UTC) and the script's --only-for-cron guard lets exactly one
-# of them proceed depending on daylight saving time. The guard tests the cron that was
-# *scheduled* (github.event.schedule), not the clock when the runner starts, because
-# GitHub routinely starts scheduled jobs late — delays of several hours happen on busy
-# shared runners. A delayed run therefore still sends; the email is simply later than
-# 10:00. If it arrives too late too often, move both crons earlier by the same amount.
-# Scheduled workflows only run from the repository's default branch.
+# Delivery is designed to survive GitHub's scheduling problems. GitHub starts scheduled
+# jobs late (often by hours), occasionally drops them, and sometimes cancels a job because
+# no hosted runner picks it up ("The job was not acquired by Runner of type hosted"). A
+# single daily cron therefore loses whole days. Instead this workflow makes many attempts
+# per day, and each attempt:
+#   1. skips if it is before 10:00 America/New_York (so the email is never early),
+#   2. skips in seconds if today's digest was already sent (a per-day cache marker),
+#   3. otherwise builds and sends the digest, and records the marker only on success.
+# Whichever attempt first runs after 10:00 sends; a failed or cancelled attempt simply
+# leaves the day open for the next one. Attempts run at :17 past the hour, away from the
+# top-of-hour load spike when GitHub delays and drops the most scheduled runs.
 #
 # Required repository secrets (Settings -> Secrets and variables -> Actions):
 #   SMTP_HOST       e.g. smtp.gmail.com
@@ -18,14 +22,18 @@
 #   DIGEST_FROM     [optional] defaults to SMTP_USERNAME
 #   ANTHROPIC_API_KEY  [optional] enables ranked, written summaries via the Claude API
 #
-# Manual runs: Actions -> "Daily news digest" -> Run workflow (tick dry_run to render only).
+# Manual runs: Actions -> "Daily news digest" -> Run workflow. A manual run sends
+# regardless of the time or the marker (tick dry_run to render only), and a real manual
+# send records the marker so the schedule does not send a second copy that day. Tick
+# respect_daily_guard to make a manual run behave exactly like a scheduled attempt.
+# Scheduled workflows only run from the repository's default branch.
 
 name: Daily news digest
 
 on:
   schedule:
-    - cron: "0 14 * * *"   # 10:00 EDT (roughly March to November)
-    - cron: "0 15 * * *"   # 10:00 EST (roughly November to March)
+    - cron: "17 14-23 * * *"   # 09:17-18:17 EST / 10:17-19:17 EDT
+    - cron: "17 0-3 * * *"     # 19:17-22:17 EST / 20:17-23:17 EDT (late safety net)
   workflow_dispatch:
     inputs:
       dry_run:
@@ -38,6 +46,10 @@ on:
         default: "26"
       no_ai:
         description: "Skip the Claude API even if ANTHROPIC_API_KEY is set"
+        type: boolean
+        default: false
+      respect_daily_guard:
+        description: "Behave like a scheduled attempt: skip before 10:00 New York time or if today's digest was already sent"
         type: boolean
         default: false
 
@@ -53,18 +65,76 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Work out today's date and whether this attempt is guarded
+        id: due
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RESPECT_GUARD: ${{ inputs.respect_daily_guard }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          today=$(TZ=America/New_York date +%F)
+          hour=$(TZ=America/New_York date +%H)
+          guarded=false
+          if [ "$EVENT_NAME" = "schedule" ] || [ "${RESPECT_GUARD:-false}" = "true" ]; then guarded=true; fi
+          early=false
+          if [ "$guarded" = "true" ] && [ "$((10#$hour))" -lt 10 ]; then early=true; fi
+          record=true
+          if [ "${DRY_RUN:-false}" = "true" ]; then record=false; fi
+          {
+            echo "date=$today"
+            echo "guarded=$guarded"
+            echo "early=$early"
+            echo "record=$record"
+          } >> "$GITHUB_OUTPUT"
+          echo "New York date $today, hour $hour; guarded=$guarded early=$early record=$record"
+
+      - name: Check whether today's digest was already sent
+        id: marker
+        if: steps.due.outputs.guarded == 'true' && steps.due.outputs.early == 'false'
+        uses: actions/cache/restore@v4
+        with:
+          path: .digest-sent
+          key: news-digest-sent-${{ steps.due.outputs.date }}
+          lookup-only: true
+
+      - name: Decide
+        id: go
+        env:
+          EARLY: ${{ steps.due.outputs.early }}
+          GUARDED: ${{ steps.due.outputs.guarded }}
+          ALREADY_SENT: ${{ steps.marker.outputs.cache-hit }}
+          TODAY: ${{ steps.due.outputs.date }}
+        run: |
+          set -euo pipefail
+          if [ "$EARLY" = "true" ]; then
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping: before 10:00 New York time; a later attempt today will send."
+          elif [ "$GUARDED" = "true" ] && [ "${ALREADY_SENT:-false}" = "true" ]; then
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping: the digest for $TODAY was already sent."
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            echo "Sending the digest for $TODAY."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.go.outputs.go == 'true'
 
       - uses: actions/setup-python@v5
+        if: steps.go.outputs.go == 'true'
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: scripts/news_digest/requirements.txt
 
       - name: Install dependencies
+        if: steps.go.outputs.go == 'true'
         run: python -m pip install --quiet -r scripts/news_digest/requirements.txt
 
       - name: Build and send the digest
+        id: send
+        if: steps.go.outputs.go == 'true'
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -73,25 +143,32 @@ jobs:
           DIGEST_TO: ${{ secrets.DIGEST_TO }}
           DIGEST_FROM: ${{ secrets.DIGEST_FROM }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          EVENT_NAME: ${{ github.event_name }}
-          SCHEDULE_CRON: ${{ github.event.schedule }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
           INPUT_HOURS: ${{ inputs.hours }}
           INPUT_NO_AI: ${{ inputs.no_ai }}
         run: |
           set -euo pipefail
           args=(run --out digest/digest.html --save-json digest/digest.json)
-          if [ "$EVENT_NAME" = "schedule" ]; then
-            # Exactly one of the two UTC crons is 10:00 New York on any given date.
-            args+=(--only-for-cron "$SCHEDULE_CRON" --target-hour 10)
-          fi
           if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then args+=(--dry-run); fi
           if [ "${INPUT_NO_AI:-false}" = "true" ]; then args+=(--no-ai); fi
           if [ -n "${INPUT_HOURS:-}" ]; then args+=(--hours "$INPUT_HOURS"); fi
           python scripts/news_digest/news_digest.py "${args[@]}"
 
+      # Reached only when the send step succeeded, so a failed send (all feeds down,
+      # SMTP error) leaves the day open and the next attempt retries.
+      - name: Mark today's digest as sent
+        if: steps.go.outputs.go == 'true' && steps.due.outputs.record == 'true'
+        run: echo "${{ steps.due.outputs.date }}" > .digest-sent
+
+      - name: Save the marker
+        if: steps.go.outputs.go == 'true' && steps.due.outputs.record == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .digest-sent
+          key: news-digest-sent-${{ steps.due.outputs.date }}
+
       - name: Keep the rendered digest as an artifact
-        if: always()
+        if: always() && steps.go.outputs.go == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: news-digest-${{ github.run_id }}

@@ -801,11 +801,14 @@ class CliTests(unittest.TestCase):
         fx = Fixture(now=datetime.now(timezone.utc))
         try:
             out = Path(fx.dir.name) / "d.html"
+            # Whichever of the two crons is NOT 10:00 New York today (season-independent).
+            off = next(c for c in ("0 14 * * *", "0 15 * * *")
+                       if not nd.cron_targets_local_hour(c, 10, "America/New_York"))
             with mock.patch.object(nd, "deliver", return_value=0) as deliver:
                 rc = nd.main(["run", "--config", str(fx.config_path), "--dry-run", "--out", str(out),
-                              "--only-for-cron", "0 15 * * *", "--target-hour", "10"])
+                              "--only-for-cron", off, "--target-hour", "10"])
             self.assertEqual(rc, 0)
-            deliver.assert_not_called()          # December cron: skipped in September
+            deliver.assert_not_called()          # the off-season cron is skipped
             with mock.patch.object(nd, "cron_targets_local_hour", return_value=True), \
                  mock.patch.object(nd, "should_run_now", return_value=False):
                 rc = nd.main(["run", "--config", str(fx.config_path), "--dry-run", "--out", str(out),
