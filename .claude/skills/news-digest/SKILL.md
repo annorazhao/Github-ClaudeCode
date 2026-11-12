@@ -190,7 +190,7 @@ Two schedulers exist so the digest arrives even when one is unavailable. Both ta
 
 | Scheduler | Where it runs | Gathers | Summarizes | Sends | Setup |
 |-----------|---------------|---------|------------|-------|-------|
-| `.github/workflows/news-digest.yml` | GitHub Actions, daily cron (14:00 and 15:00 UTC; the `--only-for-cron` guard lets through whichever one is 10:00 local that date, so daylight saving is handled and a late start still sends) | RSS + Google News feeds | Claude API if `ANTHROPIC_API_KEY` secret is set, else keyword ranking | SMTP | Repository secrets listed in the workflow header; must be on the default branch |
+| `.github/workflows/news-digest.yml` | GitHub Actions: about 14 attempts a day at :17 past the hour; the first one that runs at or after 10:00 New York time sends and leaves a per-day marker, later attempts exit in seconds, and a failed or cancelled attempt leaves the day open for the next | RSS + Google News feeds | Claude API if `ANTHROPIC_API_KEY` secret is set, else keyword ranking | SMTP | Repository secrets listed in the workflow header; must be on the default branch |
 | Claude Code Routine | A fresh cloud session at `0 14 * * *` UTC (10:00 EDT; 09:00 EST after November until the cron is adjusted) | This skill (feeds, or WebSearch when fetches are blocked) | Claude in the session | SMTP if the environment carries the variables, else a connector, else the run-notification email | Manage under claude.ai → Routines |
 
 The archive schedule is stateless: day number since `[archive].anchor` in `feeds.toml`
@@ -198,12 +198,14 @@ decides the chunk (day 0 is last year, then each earlier year to 2016, then poli
 then one quarter per day), so both schedulers show the same chunk on the same day. Preview
 it with `python3 scripts/news_digest/news_digest.py archive-plan --days 12 --verbose`.
 
-GitHub starts scheduled workflows late, sometimes by hours, so treat 10:00 as the target
-rather than the delivery time. The guard tests the cron that was *scheduled*
-(`github.event.schedule`), never the clock at start-up, so a delayed run still sends. A
-guard written against the wall clock silently drops the whole day. GitHub also disables
-schedules on public repositories with no commits for 60 days. The Routine consumes session
-usage on each run.
+GitHub starts scheduled workflows late, sometimes by hours, occasionally drops them, and
+sometimes cancels a job because no hosted runner picks it up. One cron a day therefore loses
+whole days. The workflow instead makes about 14 attempts a day; each skips before 10:00 New
+York time, skips if a per-day cache marker says the digest already went out, and otherwise
+sends and records the marker only after a successful send. A late, dropped, cancelled, or
+failed attempt simply hands the day to the next one. GitHub also disables schedules on
+public repositories with no commits for 60 days. The Routine consumes session usage on each
+run.
 
 ---
 

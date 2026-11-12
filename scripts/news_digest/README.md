@@ -106,7 +106,12 @@ Useful flags on `run`: `--hours N` (window), `--sections dc,us_energy` (subset b
 key), `--no-ai` (skip the API), `--save-json path`, `--no-archive`, `--archive-period
 2019-Q4`.
 
-Two guards exist for schedulers that fire more than one cron to hit a single local hour.
+The GitHub workflow does not use either guard below. It makes about 14 attempts a day and
+keeps a per-day cache marker, so the first attempt after 10:00 New York time sends and the
+rest exit in seconds; see the comments at the top of `.github/workflows/news-digest.yml`.
+
+Two script-level guards remain for schedulers that fire more than one cron to hit a single
+local hour.
 `--only-for-cron "0 14 * * *" --target-hour 10` proceeds only when that cron's nominal UTC
 time is 10:00 in the configured timezone today; it ignores when the run actually starts, so
 it is the right choice on GitHub Actions, where scheduled jobs often begin hours late. The
