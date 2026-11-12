@@ -283,9 +283,10 @@ transport (those go to the US topic sections by design).
 has been merged there.
 **Solution:** Merge, then trigger once by hand from the Actions tab to confirm the secrets.
 
-**Symptom:** The scheduled run succeeds in seconds but no email arrives
-**Cause:** A time guard rejected it. The Actions log shows a `skipping:` line, and the send
-step takes zero seconds.
-**Solution:** Scheduled runs must use `--only-for-cron "$SCHEDULE_CRON" --target-hour 10`,
-which reads the scheduled cron. `--only-at-hour` compares against the clock at start-up and
-therefore fails whenever GitHub delays the run past the target hour.
+**Symptom:** A day passes with no email
+**Cause:** Every attempt that day failed or never ran. Each attempt ends with a notice
+("before 10:00", "already sent") or the send output. A job cancelled with "not acquired by
+Runner of type hosted" is a GitHub capacity problem; the next attempt retries on its own.
+**Solution:** Read the latest attempts in the Actions tab; a failed send step shows the
+reason (all feeds down, SMTP rejected). Run the workflow by hand to send that day's digest.
+A real manual send also records the day's marker, so no duplicate follows.
